@@ -205,8 +205,8 @@ def main():
     
     if not route_coords.empty:
         map_center = {
-            "lat": route_coords['x'].mean(),
-            "lon": route_coords['y'].mean()
+            "lat": route_coords['y'].mean(),
+            "lon": route_coords['x'].mean()
         }
         
         fig = go.Figure(go.Scattermapbox(
