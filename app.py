@@ -22,6 +22,8 @@ if np.__version__.startswith('2.'):
 
 TIMEZONE = pytz.timezone('America/Sao_Paulo')
 
+st.set_page_config(page_title="Análise de Rotas Inteligente", layout="wide")
+
 # Configuração de tema personalizado
 custom_theme = """
 <style>
@@ -48,7 +50,6 @@ h1, h2, h3 {
 """
 st.markdown(custom_theme, unsafe_allow_html=True)
 
-st.set_page_config(page_title="Análise de Rotas Inteligente", layout="wide")
 
 # Cache para conexão de banco de dados
 @st.cache_resource
