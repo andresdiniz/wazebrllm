@@ -23,21 +23,21 @@ st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 
 # === CONEXÃO COM O BANCO DE DADOS ===
 # === CONEXÃO COM O BANCO DE DADOS ===
+# === CONEXÃO COM O BANCO DE DADOS ===
 def get_data():
     try:
         engine = create_engine('mysql+mysqlconnector://u335174317_wazeportal:%40Ndre2025.@185.213.81.52/u335174317_wazeportal')
-        with engine.connect() as connection:  # Abre uma conexão
-            query = """
-                SELECT
-                    hr.route_id,
-                    r.name AS route_name,
-                    hr.data,
-                    hr.velocidade
-                FROM historic_routes hr
-                JOIN routes r ON hr.route_id = r.id
-                ORDER BY hr.data ASC
-            """
-            df = pd.read_sql(query, connection)  # Passa a conexão para o read_sql
+        query = """
+            SELECT
+                hr.route_id,
+                r.name AS route_name,
+                hr.data,
+                hr.velocidade
+            FROM historic_routes hr
+            JOIN routes r ON hr.route_id = r.id
+            ORDER BY hr.data ASC
+        """
+        df = pd.read_sql(query, engine)  # Passa a engine diretamente para o pandas
         return df
     except Exception as e:
         st.error(f"Falha na conexão com o banco: {str(e)}")
