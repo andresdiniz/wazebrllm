@@ -31,7 +31,7 @@ def get_data():
         mydb = mysql.connector.connect(
             host="185.213.81.52",
             user="u335174317_wazeportal",
-            password="%40Ndre2025.",
+            password="@Ndre2025.",
             database="u335174317_wazeportal"
         )
         mycursor = mydb.cursor()
