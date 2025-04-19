@@ -473,49 +473,58 @@ def save_forecast_to_db(forecast_df):
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
 # --- Novas funções para alertas ---
-def get_alerts(start_date=None, end_date=None, route_id=None):
+def get_alerts(start_date=None, end_date=None, route_coords=None, max_distance_km=0.5):
     try:
         conn = get_db_connection()
         query = """
             SELECT 
-                a.uuid, a.type, a.subtype, a.street,
-                a.location_x as longitude, 
-                a.location_y as latitude,
-                a.pubMillis as data,
-                a.reportRating as severidade,
-                a.confidence as confianca,
-                a.reliability as confiabilidade,
-                r.name as route_name
-            FROM alerts a
-            LEFT JOIN routes r ON ST_DWithin(
-                ST_MakePoint(a.location_x, a.location_y)::geography,
-                r.geom::geography, 500)  # Ajuste o raio em metros
+                uuid, type, subtype, 
+                location_x as longitude,
+                location_y as latitude,
+                pubMillis as data,
+                reportRating as severidade,
+                confidence as confianca,
+                reliability as confiabilidade,
+                street
+            FROM alerts
             WHERE 1=1
         """
         conditions = []
         params = []
 
+        # Filtro temporal
         if start_date:
-            conditions.append("a.pubMillis >= %s")
-            params.append(pd.to_datetime(start_date).timestamp() * 1000)
+            start_ts = int(pd.to_datetime(start_date).timestamp() * 1000
+            conditions.append("pubMillis >= %s")
+            params.append(start_ts)
         if end_date:
-            conditions.append("a.pubMillis < %s")
-            params.append((pd.to_datetime(end_date) + pd.Timedelta(days=1)).timestamp() * 1000)
-        if route_id:
-            conditions.append("r.id = %s")
-            params.append(route_id)
+            end_ts = int((pd.to_datetime(end_date) + pd.Timedelta(days=1)).timestamp()) * 1000
+            conditions.append("pubMillis < %s")
+            params.append(end_ts)
 
         if conditions:
             query += " AND " + " AND ".join(conditions)
 
         df = pd.read_sql(query, conn, params=params)
         df['data'] = pd.to_datetime(df['data'], unit='ms')
-        return df
         
+        # Filtro espacial se houver coordenadas da rota
+        if route_coords is not None and not route_coords.empty:
+            from geopy.distance import great_circle
+            route_points = list(zip(route_coords['latitude'], route_coords['longitude']))
+            
+            def is_near(point):
+                return any(great_circle(point, route_point).km <= max_distance_km 
+                          for route_point in route_points)
+            
+            df['near_route'] = df.apply(lambda row: is_near((row['latitude'], row['longitude'])), axis=1)
+            df = df[df['near_route']]
+        
+        return df
+
     except Exception as e:
         st.error(f"Erro ao carregar alertas: {e}")
-        return pd.DataFrame()
-    
+        return pd.DataFrame()    
 
 def check_alerts(data):
     alerts = []
@@ -735,69 +744,126 @@ def main():
 
 
     st.header("🗺️ Visualização Geográfica")
-    for route in routes_to_process:
-        if route in routes_info and not routes_info[route]['data'].empty:
-            route_id = routes_info[route]['id']
-            with st.expander(f"Mapa da Rota: {route}", expanded=True):
-                # Obter coordenadas e alertas
-                route_coords = get_route_coordinates(route_id)
-                alerts_df = get_alerts(
-                    start_date=date_range_main[0],
-                    end_date=date_range_main[1],
-                    route_id=route_id
-                )
-                
-                # Criar mapa base
-                fig = go.Figure()
-                
-                # Adicionar rota
-                if not route_coords.empty:
-                    fig.add_trace(go.Scattermapbox(
-                        mode="lines+markers",
-                        lon=route_coords['longitude'],
-                        lat=route_coords['latitude'],
-                        marker={'size': 8, 'color': PRIMARY_COLOR},
-                        line=dict(width=4, color=PRIMARY_COLOR),
-                        name='Rota'
-                    ))
-                
-                # Adicionar alertas
-                if not alerts_df.empty:
-                    fig.add_trace(go.Scattermapbox(
-                        mode="markers",
-                        lon=alerts_df['longitude'],
-                        lat=alerts_df['latitude'],
-                        marker={'size': 12, 'color': ACCENT_COLOR},
-                        text=alerts_df.apply(lambda row: f"{row['type']} - {row['subtype']}<br>Severidade: {row['severidade']}", axis=1),
-                        name='Alertas',
-                        hoverinfo='text'
-                    ))
-                
-                # Configurações finais do mapa
-                fig.update_layout(
-                    mapbox_style="carto-darkmatter",
-                    margin={"r":0,"t":0,"l":0,"b":0},
-                    height=500,
-                    showlegend=True
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Estatísticas de alertas
-                with st.container():
-                    cols = st.columns(3)
-                    cols[0].metric("Total de Alertas", len(alerts_df))
-                    cols[1].metric("Tipo Mais Comum", alerts_df['type'].mode()[0] if not alerts_df.empty else 'N/A')
-                    cols[2].metric("Severidade Média", f"{alerts_df['severidade'].mean():.1f}" if not alerts_df.empty else 'N/A')
+for route in routes_to_process:
+    if route in routes_info and not routes_info[route]['data'].empty:
+        route_id = routes_info[route]['id']
+        with st.expander(f"Mapa da Rota: {route}", expanded=True):
+            route_coords = get_route_coordinates(route_id)
+            
+            # Carregar alertas com filtro espacial
+            alerts_df = get_alerts(
+                start_date=date_range_main[0],
+                end_date=date_range_main[1],
+                route_coords=route_coords
+            )
+
+            # Criar mapa
+            fig = go.Figure()
+
+            # Adicionar rota
+            if not route_coords.empty:
+                fig.add_trace(go.Scattermapbox(
+                    mode="lines+markers",
+                    lon=route_coords['longitude'],
+                    lat=route_coords['latitude'],
+                    marker={'size': 8, 'color': PRIMARY_COLOR},
+                    line=dict(width=4, color=PRIMARY_COLOR),
+                    name='Rota'
+                ))
+
+            # Adicionar alertas
+            if not alerts_df.empty:
+                fig.add_trace(go.Scattermapbox(
+                    mode="markers",
+                    lon=alerts_df['longitude'],
+                    lat=alerts_df['latitude'],
+                    marker={'size': 12, 'color': ACCENT_COLOR},
+                    text=alerts_df.apply(
+                        lambda row: f"<b>{row['type']}</b><br>{row['subtype']}<br>Severidade: {row['severidade']}",
+                        axis=1
+                    ),
+                    hoverinfo='text',
+                    name='Alertas'
+                ))
+
+            # Configurar layout
+            fig.update_layout(
+                mapbox_style="carto-darkmatter",
+                margin={"r":0,"t":0,"l":0,"b":0},
+                height=500,
+                showlegend=True
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Estatísticas
+            if not alerts_df.empty:
+                st.subheader("📊 Estatísticas de Alertas")
+                cols = st.columns(3)
+                cols[0].metric("Total de Alertas", len(alerts_df))
+                cols[1].metric("Tipo Mais Comum", alerts_df['type'].mode()[0])
+                cols[2].metric("Severidade Média", f"{alerts_df['severidade'].mean():.1f}")
 
 # --- Processar alertas ---
-    alerts_df = pd.DataFrame()
-    if routes_to_process:
-        route_id = routes_info[routes_to_process[0]]['id']
-        alerts_df = get_alerts(
-            start_date=date_range_main[0],
-            end_date=date_range_main[1],
-            route_id=route_id
+    st.header("🚨 Análise Detalhada de Alertas")
+    if not alerts_df.empty:
+        with st.expander("Filtros Avançados", expanded=True):
+            col1, col2, col3 = st.columns(3)
+            selected_type = col1.selectbox("Tipo de Alerta", ['Todos'] + list(alerts_df['type'].unique()))
+            selected_subtype = col2.selectbox("Subtipo", ['Todos'] + list(alerts_df['subtype'].unique()))
+            min_severity = col3.slider("Severidade Mínima", 0, 5, 0)
+
+        # Aplicar filtros
+        filtered_alerts = alerts_df.copy()
+        if selected_type != 'Todos':
+            filtered_alerts = filtered_alerts[filtered_alerts['type'] == selected_type]
+        if selected_subtype != 'Todos':
+            filtered_alerts = filtered_alerts[filtered_alerts['subtype'] == selected_subtype]
+        filtered_alerts = filtered_alerts[filtered_alerts['severidade'] >= min_severity]
+
+        # Visualizações
+        tab1, tab2, tab3 = st.tabs(["Tabela", "Distribuição Temporal", "Heatmap"])
+
+        with tab1:
+            st.dataframe(
+                filtered_alerts[['data', 'type', 'subtype', 'severidade', 'street']],
+                column_config={
+                    "data": "Data/Hora",
+                    "type": "Tipo",
+                    "subtype": "Subtipo",
+                    "severidade": "Severidade",
+                    "street": "Local"
+                },
+                height=300
             )
+
+        with tab2:
+            fig = px.histogram(
+                filtered_alerts,
+                x='data',
+                nbins=24,
+                color='type',
+                title='Alertas por Hora',
+                labels={'data': 'Horário', 'count': 'Alertas'},
+                color_discrete_sequence=[PRIMARY_COLOR, ACCENT_COLOR]
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab3:
+            pivot = filtered_alerts.pivot_table(
+                index=filtered_alerts['data'].dt.hour,
+                columns=filtered_alerts['data'].dt.day,
+                values='uuid',
+                aggfunc='count'
+            )
+            fig, ax = plt.subplots(figsize=(12, 6))
+            sns.heatmap(pivot, cmap="YlOrRd", ax=ax)
+            ax.set_title("Densidade de Alertas por Hora e Dia")
+            ax.set_xlabel("Dia")
+            ax.set_ylabel("Hora do Dia")
+            st.pyplot(fig)
+
+    else:
+        st.info("Nenhum alerta encontrado para o período selecionado")
         
     # --- Seção de Análise ---
     st.header("📈 Análise Preditiva")
