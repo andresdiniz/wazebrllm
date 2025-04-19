@@ -473,7 +473,6 @@ def save_forecast_to_db(forecast_df):
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
 # --- Novas funções para alertas ---
-@st.cache_data(show_spinner=False)
 def get_alerts(start_date=None, end_date=None, route_id=None):
     try:
         conn = get_db_connection()
