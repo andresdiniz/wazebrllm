@@ -35,7 +35,7 @@ custom_theme = """
 <style>
 :root {
     --primary-color: #007BFF;
-    --background-color: #F9FAFC;
+    --background-color: #000;
     --secondary-background-color: #FFFFFF;
     --accent-color: #17A2B8;
     --text-color: #343A40;
