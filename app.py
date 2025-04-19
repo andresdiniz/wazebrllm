@@ -64,6 +64,8 @@ def get_data(start_date=None, end_date=None, route_id=None):
         mycursor.close()
         mydb.close()
 
+zip
+
         st.write("Tipos de dados lidos do banco:")
         st.write(df.dtypes)
 
