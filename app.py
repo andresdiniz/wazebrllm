@@ -174,7 +174,6 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # database = "u335174317_wazeportal"
 
 # faz conexxão com o banco de dados MySQL (cached)
-@st.cache_resource(ttl=3600) # Cache a conexão do banco de dados por 1 hora
 def get_db_connection():
     try:
         conn = mysql.connector.connect(
@@ -189,7 +188,6 @@ def get_db_connection():
         st.stop() # Parar a execução se não conseguir conectar
 
 # Carregar apenas nomes das rotas (cached)
-@st.cache_data(ttl=3600) # Cache por 1 hora
 def get_all_route_names():
     mydb = None
     mycursor = None
@@ -208,7 +206,6 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão aqui se estiver usando @st.cache_resource
 
-@st.cache_data(ttl=600) # Cache por 10 minutos, dados podem mudar mais frequentemente
 def get_data(start_date=None, end_date=None, route_name=None):
     mydb = None
     mycursor = None
@@ -258,7 +255,6 @@ def get_data(start_date=None, end_date=None, route_name=None):
         # Não feche a conexão aqui se estiver usando @st.cache_resource
 
 
-@st.cache_data(ttl=3600) # Cache por 1 hora, coordenadas não mudam
 def get_route_coordinates(route_id):
     mydb = None
     mycursor = None
@@ -375,7 +371,6 @@ def seasonal_decomposition_plot(df):
 
 
 # Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados)
-@st.cache_data(ttl=300) # Cache por 5 minutos para previsões
 def create_arima_forecast(df, route_id, steps=10):
     if df.empty:
         return pd.DataFrame()
