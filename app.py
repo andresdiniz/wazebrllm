@@ -9,7 +9,6 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
-import time
 import mysql.connector
 import pytz
 
@@ -18,13 +17,15 @@ if np.__version__.startswith('2.'):
     np.int_ = np.int_
     np.bool_ = np.bool_
 
+TIMEZONE = pytz.timezone('America/Sao_Paulo')
+
 st.set_page_config(page_title="Análise de Rotas", layout="wide")
 
 with st.sidebar:
     st.title("ℹ️ Sobre")
     st.markdown("""
         Esta aplicação permite analisar a velocidade média em rotas específicas ao longo do tempo.
-        
+
         - Use os filtros para selecionar o intervalo de análise.
         - Veja previsões automáticas com ARIMA.
         - Detecte anomalias e visualize tendências.
@@ -73,10 +74,9 @@ def get_data(start_date=None, end_date=None, route_id=None):
         mydb.close()
 
         df['velocidade'] = pd.to_numeric(df['velocidade'], errors='coerce')
-        return df
+        return df, None
     except Exception as e:
-        st.error(f"Falha na conexão com o banco: {str(e)}")
-        st.stop()
+        return None, str(e)
 
 def clean_data(df, route):
     df = df[df['route_name'] == route].copy()
@@ -93,10 +93,11 @@ def clean_data(df, route):
     df['hour'] = df['data'].dt.hour
     return df.dropna(subset=['velocidade'])
 
-def detect_anomalies_iforest(df):
-    clf = IsolationForest(contamination=0.05)
-    df['anomaly'] = clf.fit_predict(df[['velocidade']])
-    return df[df['anomaly'] == -1]
+def detect_anomalies(df):
+    df = df.copy()
+    df['vel_diff'] = df['velocidade'].diff().abs()
+    threshold = df['vel_diff'].quantile(0.95) * 1.5
+    return df[df['vel_diff'] > max(threshold, 20)]
 
 def plot_interactive_graph(df, x_col, y_col):
     if 'data' not in df.columns:
@@ -115,16 +116,15 @@ def seasonal_decomposition_plot(df):
     plt.tight_layout()
     st.pyplot(fig)
 
-def create_arima_forecast(df, route_id):
+def create_arima_forecast(df, route_id, steps=10):
     try:
         model = ARIMA(df['y'], order=(3, 1, 1))
         results = model.fit()
-        forecast = results.get_forecast(steps=10)
+        forecast = results.get_forecast(steps=steps)
 
-        sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
         last_timestamp_utc = pd.to_datetime(df['ds'].max())
 
-        future_timestamps = pd.date_range(start=last_timestamp_utc, periods=len(forecast.predicted_mean) + 1, freq='3min', tz='America/Sao_Paulo')[1:]
+        future_timestamps = pd.date_range(start=last_timestamp_utc, periods=len(forecast.predicted_mean) + 1, freq='3min', tz=TIMEZONE)[1:]
 
         forecast_df = pd.DataFrame({
             'ds': future_timestamps,
@@ -137,13 +137,13 @@ def create_arima_forecast(df, route_id):
     except Exception as e:
         st.warning(f"Erro ao treinar o modelo ARIMA: {e}.")
         last_value = df['y'].iloc[-1]
-        future_timestamps = pd.date_range(start=pd.to_datetime(df['ds'].max()), periods=11, freq='3min', tz='America/Sao_Paulo')[1:]
+        future_timestamps = pd.date_range(start=pd.to_datetime(df['ds'].max()), periods=steps + 1, freq='3min', tz=TIMEZONE)[1:]
         return pd.DataFrame({
             'ds': future_timestamps,
-            'yhat': [last_value] * 10,
-            'yhat_lower': [last_value - 5] * 10,
-            'yhat_upper': [last_value + 5] * 10,
-            'id_route': [route_id] * 10
+            'yhat': [last_value] * steps,
+            'yhat_lower': [last_value - 5] * steps,
+            'yhat_upper': [last_value + 5] * steps,
+            'id_route': [route_id] * steps
         })
 
 def save_forecast_to_db(forecast_df):
@@ -165,12 +165,16 @@ def gerar_insights(df):
     insights.append(f"📌 Velocidade média geral: **{media_geral:.2f} km/h**")
     insights.append(f"📅 Dia mais lento: **{dia_mais_lento.strftime('%Y-%m-%d')}** ({velocidade_dia_mais_lento:.2f} km/h)")
     insights.append(f"📅 Dia da semana mais lento: **{dia_da_semana_mais_lento}**")
-    insights.append(f"🕒 Hora mais lenta: **{hora_mais_lenta}:00**")
+    insights.append(f"🕒 Hora mais lenta: **{hora_mais_lenta:02d}:00**")
 
     return "\n\n".join(insights)
 
 def main():
-    raw_df_all_routes = get_data()
+    raw_df_all_routes, error = get_data()
+    if error:
+        st.error(f"Erro: {error}")
+        st.stop()
+
     route_name = st.selectbox("Selecione a rota:", raw_df_all_routes['route_name'].unique())
     route_id = raw_df_all_routes[raw_df_all_routes['route_name'] == route_name]['route_id'].unique()[0]
 
@@ -179,7 +183,10 @@ def main():
     date_start = date_range[0].strftime('%Y-%m-%d')
     date_end = date_range[1].strftime('%Y-%m-%d')
 
-    raw_df = get_data(start_date=date_start, end_date=date_end, route_id=route_id)
+    raw_df, error = get_data(start_date=date_start, end_date=date_end, route_id=route_id)
+    if error:
+        st.error(f"Erro ao carregar dados filtrados: {error}")
+        st.stop()
 
     with st.expander("📋 Visualizar dados brutos"):
         st.dataframe(raw_df)
@@ -192,7 +199,7 @@ def main():
 
     st.subheader("🔮 Previsão de Velocidade (ARIMA)")
     st.markdown("""
-        Este gráfico mostra a previsão de velocidade para os próximos 30 minutos (10 passos de 3 minutos) usando o modelo ARIMA.
+        Este gráfico mostra a previsão de velocidade para os próximos minutos usando o modelo ARIMA.
         A linha laranja representa a previsão, enquanto a faixa sombreada mostra o intervalo de confiança.
     """)
 
@@ -203,7 +210,8 @@ def main():
     arima_df['y'] = pd.to_numeric(arima_df['y'], errors='raise')
     arima_df_display = arima_df[-200:] if len(arima_df) > 200 else arima_df.copy()
 
-    arima_forecast = create_arima_forecast(arima_df, route_id)
+    steps = st.slider("⏱️ Quantidade de passos de previsão (3min cada)", 5, 20, 10)
+    arima_forecast = create_arima_forecast(arima_df, route_id, steps=steps)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=arima_df_display['ds'], y=arima_df_display['y'], mode='lines', name='Histórico', line=dict(color='blue')))
@@ -225,7 +233,7 @@ def main():
     st.plotly_chart(fig, use_container_width=True)
 
     velocidade_prevista_media = arima_forecast['yhat'].mean()
-    st.markdown(f"📉 Velocidade média prevista nos próximos 30 minutos: **{velocidade_prevista_media:.2f} km/h**")
+    st.markdown(f"📉 Velocidade média prevista: **{velocidade_prevista_media:.2f} km/h**")
 
     save_forecast_to_db(arima_forecast)
 
@@ -236,8 +244,13 @@ def main():
     plot_interactive_graph(processed_df, 'data', 'velocidade')
 
     st.subheader("🌡️ Mapa de Calor de Velocidade por Hora e Dia da Semana")
+    dias_semana_pt = {
+        'Monday': 'Segunda', 'Tuesday': 'Terça', 'Wednesday': 'Quarta',
+        'Thursday': 'Quinta', 'Friday': 'Sexta', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
+    }
     heatmap_df = processed_df.groupby(['day_of_week', 'hour'])['velocidade'].mean().unstack()
-    heatmap_df = heatmap_df.reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+    heatmap_df.index = heatmap_df.index.map(dias_semana_pt)
+    heatmap_df = heatmap_df.reindex(['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'])
     fig, ax = plt.subplots(figsize=(12, 5))
     sns.heatmap(heatmap_df, cmap="coolwarm", annot=True, fmt=".1f", linewidths=.5, ax=ax)
     plt.title("Velocidade Média por Hora e Dia da Semana")
@@ -251,15 +264,10 @@ def main():
         st.success("Nenhuma anomalia significativa detectada.")
 
     st.subheader("📥 Baixar Gráfico de Previsão")
-    try:
-        import kaleido  # for deployment environments that support it
-        buffer = BytesIO()
-        fig.write_image(buffer, format='png')
-        buffer.seek(0)
-        st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
-    except Exception as e:
-        st.warning("Não foi possível gerar a imagem para download. Certifique-se de que o pacote 'kaleido' está instalado.")
-
+    buffer = BytesIO()
+    fig.write_image(buffer, format='png')
+    buffer.seek(0)
+    st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
 
     st.markdown("### 📉 Tendência Geral de Velocidade")
     trend_df = processed_df.copy()
@@ -272,8 +280,8 @@ def main():
     csv = processed_df.to_csv(index=False).encode('utf-8')
     st.download_button(label="Baixar CSV", data=csv, file_name='dados_filtrados.csv', mime='text/csv')
 
-    time.sleep(300)
-    st.experimental_rerun()
+    if st.button("🔄 Atualizar Dados"):
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
