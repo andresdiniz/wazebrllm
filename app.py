@@ -152,7 +152,7 @@ def plot_interactive_graph(df, x_col, y_col):
     st.plotly_chart(fig)
 
 def seasonal_decomposition_plot(df):
-    df = df.set_index('data')
+    df = df.set_index('data').asfreq('3T')  # Definir frequência temporal
     decomposition = seasonal_decompose(df['velocidade'], model='additive', period=24)
     fig, ax = plt.subplots(3, 1, figsize=(12, 8))
     decomposition.observed.plot(ax=ax[0], title='Observado')
