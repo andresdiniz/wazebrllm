@@ -305,7 +305,7 @@ def main():
     heatmap_df.index = heatmap_df.index.map(dias_semana_pt)
     heatmap_df = heatmap_df.reindex(['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'])
     fig, ax = plt.subplots(figsize=(12, 5))
-    sns.heatmap(heatmap_df, cmap="coolwarm", annot=True, fmt=".1f", linewidths=.5, ax=ax)
+    sns.heatmap(heatmap_df, cmap="coolwarm_r", annot=True, fmt=".1f", linewidths=.5, ax=ax)
     plt.title("Velocidade Média por Hora e Dia da Semana")
     st.pyplot(fig)
 
