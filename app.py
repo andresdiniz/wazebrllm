@@ -1,10 +1,18 @@
 import streamlit as st
+
+# Configuração da página DEVE SER A PRIMEIRA CHAMADA
+st.set_page_config(
+    page_title="Análise de Rotas Inteligente",
+    layout="wide",
+    page_icon="📊"
+)
+
+# Restante das importações
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
 import matplotlib.pyplot as plt
 import seaborn as sns
-from statsmodels.tsa.arima.model import ARIMA
 from statsmodels.tsa.seasonal import seasonal_decompose
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,7 +22,7 @@ import pytz
 from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
 
-# Configurações de cache e performance
+# Configurações de compatibilidade do numpy
 if np.__version__.startswith('2.'):
     np.float_ = np.float64
     np.int_ = np.int_
@@ -22,9 +30,7 @@ if np.__version__.startswith('2.'):
 
 TIMEZONE = pytz.timezone('America/Sao_Paulo')
 
-st.set_page_config(page_title="Análise de Rotas Inteligente", layout="wide")
-
-# Configuração de tema personalizado
+# Tema personalizado
 custom_theme = """
 <style>
 :root {
@@ -50,8 +56,7 @@ h1, h2, h3 {
 """
 st.markdown(custom_theme, unsafe_allow_html=True)
 
-
-# Cache para conexão de banco de dados
+# Cache para recursos
 @st.cache_resource
 def get_db_connection():
     return mysql.connector.connect(
@@ -61,8 +66,7 @@ def get_db_connection():
         database="u335174317_wazeportal"
     )
 
-# Cache para dados com atualização periódica
-@st.cache_data(ttl=3600, show_spinner="Carregando dados...")
+@st.cache_data(ttl=3600)
 def get_data(start_date=None, end_date=None, route_id=None):
     try:
         mydb = get_db_connection()
@@ -104,56 +108,122 @@ def get_data(start_date=None, end_date=None, route_id=None):
         mycursor.close()
         mydb.close()
 
-# Função para análise de qualidade dos dados
-def data_quality_report(df):
-    report = {
-        "total_registros": len(df),
-        "registros_faltantes": df['velocidade'].isnull().sum(),
-        "outliers_velocidade": len(df[df['velocidade'] > 150]),
-        "velocidade_media": df['velocidade'].mean(),
-        "periodo_cobertura": f"{df['data'].min().date()} a {df['data'].max().date()}"
-    }
-    return report
-
-# Função para carregar histórico de previsões
-def load_historical_forecasts(route_id):
+def get_route_coordinates(route_id):
     try:
         mydb = get_db_connection()
-        query = """
-            SELECT f.ds AS data_previsao, f.yhat, h.data, h.velocidade
-            FROM forecast_history f
-            JOIN historic_routes h ON f.ds = h.data AND f.id_route = h.route_id
-            WHERE f.id_route = %s
-        """
-        df = pd.read_sql(query, mydb, params=(route_id,))
-        
-        if not df.empty:
-            df['erro'] = abs(df['yhat'] - df['velocidade'])
-            df['erro_percentual'] = (df['erro'] / df['velocidade']) * 100
+        mycursor = mydb.cursor()
+        query = "SELECT x, y FROM route_lines WHERE route_id = %s ORDER BY id"
+        mycursor.execute(query, (route_id,))
+        results = mycursor.fetchall()
+        df = pd.DataFrame(results, columns=['longitude', 'latitude'])
+        mycursor.close()
+        mydb.close()
         return df
     except Exception as e:
-        st.error(f"Erro ao carregar histórico: {e}")
+        st.error(f"Erro ao obter coordenadas: {e}")
         return pd.DataFrame()
+
+def clean_data(df, route):
+    df = df[df['route_name'] == route].copy()
+    df['data'] = pd.to_datetime(df['data']).dt.tz_localize(None)
+    df = df.sort_values('data')
+    df['velocidade'] = (
+        df['velocidade']
+        .clip(upper=150)
+        .interpolate(method='linear')
+        .ffill()
+        .bfill()
+    )
+    df['day_of_week'] = df['data'].dt.day_name()
+    df['hour'] = df['data'].dt.hour
+    return df.dropna(subset=['velocidade'])
+
+def detect_anomalies(df):
+    df = df.copy()
+    df['vel_diff'] = df['velocidade'].diff().abs()
+    threshold = df['vel_diff'].quantile(0.95) * 1.5
+    return df[df['vel_diff'] > max(threshold, 20)]
+
+def plot_interactive_graph(df, x_col, y_col):
+    if 'data' not in df.columns:
+        df['data'] = df.index
+    fig = px.line(df, x=x_col, y=y_col, title=f'{y_col} ao Longo do Tempo')
+    fig.update_layout(xaxis_title='Data', yaxis_title=y_col)
+    st.plotly_chart(fig)
+
+def seasonal_decomposition_plot(df):
+    df = df.set_index('data')
+    decomposition = seasonal_decompose(df['velocidade'], model='additive', period=24)
+    fig, ax = plt.subplots(3, 1, figsize=(12, 8))
+    decomposition.observed.plot(ax=ax[0], title='Observado')
+    decomposition.trend.plot(ax=ax[1], title='Tendência')
+    decomposition.seasonal.plot(ax=ax[2], title='Sazonalidade')
+    plt.tight_layout()
+    st.pyplot(fig)
+
+def create_arima_forecast(df, route_id, steps=10):
+    try:
+        model = auto_arima(df['y'], seasonal=True, m=24,
+                          error_action='ignore', suppress_warnings=True)
+        forecast = model.predict(n_periods=steps)
+        
+        last_date = df['ds'].max()
+        future_dates = pd.date_range(start=last_date, periods=steps+1, freq='3min')[1:]
+        
+        return pd.DataFrame({
+            'ds': future_dates,
+            'yhat': forecast,
+            'yhat_lower': forecast - 5,
+            'yhat_upper': forecast + 5,
+            'id_route': route_id
+        })
+    except Exception as e:
+        st.error(f"Erro no modelo de previsão: {str(e)}")
+        return pd.DataFrame()
+
+def save_forecast_to_db(forecast_df):
+    try:
+        engine = create_engine('mysql+mysqlconnector://u335174317_wazeportal:%40Ndre2025.@185.213.81.52/u335174317_wazeportal')
+        with engine.begin() as connection:
+            forecast_df.to_sql('forecast_history', con=connection, if_exists='append', index=False)
+    except Exception as e:
+        st.error(f"Erro ao salvar previsão: {e}")
+
+def gerar_insights(df):
+    insights = []
+    media_geral = df['velocidade'].mean()
+    dia_mais_lento = df.groupby('data')['velocidade'].mean().idxmin()
+    velocidade_dia_mais_lento = df[df['data'] == dia_mais_lento]['velocidade'].mean()
+    dia_da_semana_mais_lento = df.groupby('day_of_week')['velocidade'].mean().idxmin()
+    hora_mais_lenta = df.groupby('hour')['velocidade'].mean().idxmin()
+
+    insights.append(f"📌 Velocidade média geral: **{media_geral:.2f} km/h**")
+    insights.append(f"📅 Dia mais lento: **{dia_mais_lento.strftime('%Y-%m-%d')}** ({velocidade_dia_mais_lento:.2f} km/h)")
+    insights.append(f"📅 Dia da semana mais lento: **{dia_da_semana_mais_lento}**")
+    insights.append(f"🕒 Hora mais lenta: **{hora_mais_lenta:02d}:00**")
+
+    return "\n\n".join(insights)
 
 def main():
     with st.sidebar:
         st.title("ℹ️ Painel de Controle")
         st.markdown("""
             **Configurações Avançadas:**
-            - Selecione rotas para comparação
+            - Compare múltiplas rotas
             - Ajuste parâmetros de análise
+            - Visualize histórico de previsões
         """)
 
     st.title("🚀 Análise de Rotas Inteligente")
     
-    # Carregamento de dados com feedback visual
+    # Carregamento de dados
     with st.spinner('Carregando dados básicos...'):
         raw_df_all_routes, error = get_data()
         if error:
             st.error(f"Erro: {error}")
             st.stop()
 
-    # Seleção de rotas para comparação
+    # Seleção de rotas
     col1, col2 = st.columns(2)
     with col1:
         route_name = st.selectbox("Rota Principal:", raw_df_all_routes['route_name'].unique())
@@ -163,7 +233,6 @@ def main():
             second_route = st.selectbox("Rota Secundária:", 
                                       [r for r in raw_df_all_routes['route_name'].unique() if r != route_name])
 
-    # Processamento paralelo para múltiplas rotas
     routes_to_process = [route_name]
     if compare_enabled:
         routes_to_process.append(second_route)
@@ -173,7 +242,6 @@ def main():
         with st.spinner(f'Processando {route}...'):
             route_id = raw_df_all_routes[raw_df_all_routes['route_name'] == route]['route_id'].unique()[0]
             
-            # Validação de datas
             date_range = st.date_input(f"Intervalo para {route}", 
                                      value=(pd.to_datetime('today') - pd.Timedelta(days=7), pd.to_datetime('today')),
                                      max_value=pd.to_datetime('today'),
@@ -195,23 +263,22 @@ def main():
                 'id': route_id
             }
 
-    # Seção do Mapa da Rota com Zoom Automático
-    st.subheader("🗺️ Mapa Inteligente da Rota")
+    # Seção do Mapa
+    st.header("🗺️ Visualização Geográfica")
     for route in routes_to_process:
-        with st.expander(f"Mapa para {route}", expanded=True):
+        with st.expander(f"Mapa da Rota: {route}", expanded=True):
             route_coords = get_route_coordinates(all_data[route]['id'])
             
             if not route_coords.empty:
-                # Cálculo de limites para zoom automático
-                max_lat = route_coords['y'].max() + 0.002
-                min_lat = route_coords['y'].min() - 0.002
-                max_lon = route_coords['x'].max() + 0.002
-                min_lon = route_coords['x'].min() - 0.002
+                max_lat = route_coords['latitude'].max() + 0.002
+                min_lat = route_coords['latitude'].min() - 0.002
+                max_lon = route_coords['longitude'].max() + 0.002
+                min_lon = route_coords['longitude'].min() - 0.002
                 
                 fig = go.Figure(go.Scattermapbox(
                     mode="lines+markers",
-                    lon=route_coords['x'],
-                    lat=route_coords['y'],
+                    lon=route_coords['longitude'],
+                    lat=route_coords['latitude'],
                     marker={'size': 10, 'color': "#FF0000"},
                     line=dict(width=4, color='#1E90FF'),
                     hovertext=[f"Ponto {i+1}" for i in range(len(route_coords))],
@@ -235,77 +302,64 @@ def main():
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.warning("Nenhuma coordenada encontrada para esta rota")
+                st.warning("Nenhuma coordenada geográfica encontrada")
 
-    # Seção de Previsão com Auto-ARIMA
-    st.header("🔮 Previsão Inteligente")
+    # Seção de Análise
+    st.header("📈 Análise Preditiva")
     for route in routes_to_process:
-        with st.expander(f"Previsão para {route}", expanded=True):
-            arima_df = all_data[route]['data'][['data', 'velocidade']].rename(columns={
+        with st.expander(f"Análise para {route}", expanded=True):
+            processed_df = all_data[route]['data']
+            
+            st.subheader("🔮 Previsão de Velocidade")
+            arima_df = processed_df[['data', 'velocidade']].rename(columns={
                 'data': 'ds', 
                 'velocidade': 'y'
             })
             
-            # Modelagem com Auto-ARIMA
-            with st.spinner('Treinando modelo inteligente...'):
-                try:
-                    model = auto_arima(arima_df['y'], seasonal=True, m=24,
-                                      error_action='ignore', suppress_warnings=True)
-                    forecast = model.predict(n_periods=10)
-                    
-                    # Criação do dataframe de previsão
-                    last_date = arima_df['ds'].max()
-                    future_dates = pd.date_range(start=last_date, periods=11, freq='3min')[1:]
-                    
-                    forecast_df = pd.DataFrame({
-                        'ds': future_dates,
-                        'yhat': forecast,
-                        'id_route': all_data[route]['id']
-                    })
-                    
-                    # Exibição da previsão
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=arima_df['ds'], 
-                        y=arima_df['y'],
-                        mode='lines',
-                        name='Histórico'
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=forecast_df['ds'],
-                        y=forecast_df['yhat'],
-                        mode='lines',
-                        name='Previsão'
-                    ))
-                    fig.update_layout(
-                        title=f"Previsão para {route}",
-                        xaxis_title="Data e Hora",
-                        yaxis_title="Velocidade (km/h)"
-                    )
-                    st.plotly_chart(fig)
-                    
-                    # Análise de precisão histórica
-                    hist_forecasts = load_historical_forecasts(all_data[route]['id'])
-                    if not hist_forecasts.empty:
-                        mae = mean_absolute_error(hist_forecasts['velocidade'], hist_forecasts['yhat'])
-                        st.metric("Precisão Histórica (MAE)", f"{mae:.2f} km/h")
-                    
-                    save_forecast_to_db(forecast_df)
-                    
-                except Exception as e:
-                    st.error(f"Erro no modelo de previsão: {str(e)}")
+            steps = st.slider("⏱️ Passos de previsão (3min cada)", 5, 20, 10, key=f"steps_{route}")
+            arima_forecast = create_arima_forecast(arima_df, all_data[route]['id'], steps)
+            
+            if not arima_forecast.empty:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=arima_df['ds'], 
+                    y=arima_df['y'],
+                    mode='lines',
+                    name='Histórico'
+                ))
+                fig.add_trace(go.Scatter(
+                    x=arima_forecast['ds'],
+                    y=arima_forecast['yhat'],
+                    mode='lines',
+                    name='Previsão'
+                ))
+                fig.update_layout(
+                    title=f"Previsão para {route}",
+                    xaxis_title="Data e Hora",
+                    yaxis_title="Velocidade (km/h)"
+                )
+                st.plotly_chart(fig)
+                
+                save_forecast_to_db(arima_forecast)
 
-    # Seção de Auditoria de Dados
-    st.header("🔍 Auditoria de Qualidade")
-    with st.expander("Relatório Completo de Dados"):
+            st.subheader("🧠 Insights Automáticos")
+            st.markdown(gerar_insights(processed_df))
+
+            st.subheader("📉 Decomposição Temporal")
+            seasonal_decomposition_plot(processed_df)
+
+    # Seção Técnica
+    st.header("⚙️ Detalhes Técnicos")
+    with st.expander("Relatório de Qualidade de Dados"):
         for route in routes_to_process:
-            report = data_quality_report(all_data[route]['data'])
-            st.subheader(f"Relatório para {route}")
+            st.subheader(f"Qualidade dos Dados: {route}")
+            report = {
+                "total_registros": len(all_data[route]['data']),
+                "registros_faltantes": all_data[route]['data']['velocidade'].isnull().sum(),
+                "outliers_detectados": len(all_data[route]['data'][all_data[route]['data']['velocidade'] > 150]),
+                "cobertura_temporal": f"{all_data[route]['data']['data'].min().date()} a {all_data[route]['data']['data'].max().date()}"
+            }
             st.json(report)
-
-    # Integração com dados externos (exemplo climático)
-    if st.checkbox("Mostrar análise contextual (beta)"):
-        st.info("Funcionalidade em desenvolvimento - integração com APIs externas")
 
 if __name__ == "__main__":
     main()
