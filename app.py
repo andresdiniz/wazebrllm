@@ -252,10 +252,15 @@ def main():
         st.success("Nenhuma anomalia significativa detectada.")
 
     st.subheader("📥 Baixar Gráfico de Previsão")
-    buffer = BytesIO()
-    fig.write_image(buffer, format='png')
-    buffer.seek(0)
-    st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
+    try:
+        import kaleido  # for deployment environments that support it
+        buffer = BytesIO()
+        fig.write_image(buffer, format='png')
+        buffer.seek(0)
+        st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
+    except Exception as e:
+        st.warning("Não foi possível gerar a imagem para download. Certifique-se de que o pacote 'kaleido' está instalado.")
+
 
     st.markdown("### 📉 Tendência Geral de Velocidade")
     trend_df = processed_df.copy()
