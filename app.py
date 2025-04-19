@@ -492,13 +492,15 @@ def get_alerts(start_date=None, end_date=None, route_coords=None, max_distance_k
         conditions = []
         params = []
 
-        # Filtro temporal
+        # Filtro temporal corrigido
         if start_date:
-            start_ts = int(pd.to_datetime(start_date).timestamp() * 1000
+            start_ts = int(pd.to_datetime(start_date).timestamp()) * 1000  # Parêntese fechado
             conditions.append("pubMillis >= %s")
             params.append(start_ts)
+            
         if end_date:
-            end_ts = int((pd.to_datetime(end_date) + pd.Timedelta(days=1)).timestamp()) * 1000
+            end_date_plus_1 = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+            end_ts = int(end_date_plus_1.timestamp()) * 1000  # Sintaxe corrigida
             conditions.append("pubMillis < %s")
             params.append(end_ts)
 
@@ -508,7 +510,7 @@ def get_alerts(start_date=None, end_date=None, route_coords=None, max_distance_k
         df = pd.read_sql(query, conn, params=params)
         df['data'] = pd.to_datetime(df['data'], unit='ms')
         
-        # Filtro espacial se houver coordenadas da rota
+        # Filtro espacial (mantido igual)
         if route_coords is not None and not route_coords.empty:
             from geopy.distance import great_circle
             route_points = list(zip(route_coords['latitude'], route_coords['longitude']))
@@ -524,7 +526,7 @@ def get_alerts(start_date=None, end_date=None, route_coords=None, max_distance_k
 
     except Exception as e:
         st.error(f"Erro ao carregar alertas: {e}")
-        return pd.DataFrame()    
+        return pd.DataFrame()
 
 def check_alerts(data):
     alerts = []
