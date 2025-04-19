@@ -226,11 +226,18 @@ def get_data(start_date=None, end_date=None, route_name=None):
              conditions.append("r.name = %s")
              params.append(route_name)
         if start_date:
+            # Para a data de início, <= é correto se a hora for 00:00:00,
+            # ou >= se quisermos incluir o início do dia. >= é mais comum.
             conditions.append("hr.data >= %s")
             params.append(start_date)
         if end_date:
-            conditions.append("hr.data <= %s")
-            params.append(end_date)
+            # CORREÇÃO: Para incluir o último dia completo, filtrar por < (data final + 1 dia)
+            # Converte a string de data final para objeto datetime, adiciona 1 dia e converte de volta para string YYYY-MM-DD
+            end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+            end_date_plus_one_day_str = end_datetime.strftime('%Y-%m-%d') # Formatar como YYYY-MM-DD
+
+            conditions.append("hr.data < %s") # Usar o operador MENOR QUE (<)
+            params.append(end_date_plus_one_day_str) # Usar a data final + 1 dia
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -252,7 +259,6 @@ def get_data(start_date=None, end_date=None, route_name=None):
     finally:
         if mycursor:
             mycursor.close()
-        # Não feche a conexão aqui se estiver usando @st.cache_resource
 
 
 def get_route_coordinates(route_id):
