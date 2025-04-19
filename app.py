@@ -24,7 +24,6 @@ st.set_page_config(page_title="Análise de Rotas", layout="wide")
 st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 
 # === CONEXÃO COM O BANCO DE DADOS ===
-# === CONEXÃO COM O BANCO DE DADOS ===
 def get_data():
     try:
         mydb = mysql.connector.connect(
@@ -54,10 +53,13 @@ def get_data():
         st.write("Tipos de dados lidos do banco:")
         st.write(df.dtypes)
 
-        non_numeric_velocidade = pd.to_numeric(df['velocidade'], errors='coerce')
-        non_numeric_rows = df[non_numeric_velocidade.isna()]
+        # Tenta converter a coluna 'velocidade' para numérico, forçando erros para NaN
+        df['velocidade'] = pd.to_numeric(df['velocidade'], errors='coerce')
+
+        # Exibe as linhas onde a conversão falhou (eram valores não numéricos)
+        non_numeric_rows = df[df['velocidade'].isna()]
         if not non_numeric_rows.empty:
-            st.warning("Valores não numéricos encontrados na coluna 'velocidade' ao ler do banco:")
+            st.warning("Valores não numéricos encontrados na coluna 'velocidade' ao ler do banco (convertidos para NaN):")
             st.dataframe(non_numeric_rows)
 
         return df
@@ -124,7 +126,6 @@ def create_arima_forecast(df):
     })
 
 # === SALVAR PREVISÃO NO BANCO ===
-# === SALVAR PREVISÃO NO BANCO ===
 def save_forecast_to_db(forecast_df):
     try:
         engine = create_engine('mysql+mysqlconnector://u335174317_wazeportal:%40Ndre2025.@185.213.81.52/u335174317_wazeportal')
@@ -158,7 +159,7 @@ def gerar_insights(df):
 # === INTERFACE PRINCIPAL ===
 def main():
     raw_df = get_data()
-    
+
     with st.expander("📋 Visualizar dados brutos"):
         st.dataframe(raw_df)
 
@@ -173,9 +174,9 @@ def main():
     st.subheader("🔎 Filtros")
     date_range = st.date_input("Intervalo de datas", [processed_df['data'].min(), processed_df['data'].max()])
     min_speed, max_speed = st.slider(
-        "Faixa de velocidade (km/h)", 
-        min_value=int(processed_df['velocidade'].min()), 
-        max_value=int(processed_df['velocidade'].max()), 
+        "Faixa de velocidade (km/h)",
+        min_value=int(processed_df['velocidade'].min()),
+        max_value=int(processed_df['velocidade'].max()),
         value=(int(processed_df['velocidade'].min()), int(processed_df['velocidade'].max()))
     )
 
@@ -183,9 +184,9 @@ def main():
     date_end = pd.to_datetime(date_range[1])
 
     processed_df = processed_df[(
-        processed_df['data'] >= date_start) & 
-        (processed_df['data'] <= date_end) & 
-        (processed_df['velocidade'] >= min_speed) & 
+        processed_df['data'] >= date_start) &
+        (processed_df['data'] <= date_end) &
+        (processed_df['velocidade'] >= min_speed) &
         (processed_df['velocidade'] <= max_speed)
     ]
 
@@ -204,7 +205,11 @@ def main():
     st.markdown(gerar_insights(processed_df))
 
     display_limit = 200
-    arima_df = processed_df[['data', 'velocidade']].rename(columns={'data': 'ds', 'velocidade': 'y'})
+    arima_df = processed_df[['data', 'velocidade']].rename(columns={'data': 'ds', 'velocidade': 'y'}).copy()
+
+    # Garante que a coluna 'y' seja numérica antes de passar para o ARIMA
+    arima_df['y'] = pd.to_numeric(arima_df['y'], errors='raise') # Usamos 'raise' para ver se ainda há erros
+
     arima_df_display = arima_df[-display_limit:] if len(arima_df) > display_limit else arima_df.copy()
 
     arima_forecast = create_arima_forecast(arima_df)
