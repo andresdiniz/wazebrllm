@@ -157,6 +157,25 @@ h1, h2, h3, h4, h5, h6 {{
     border-color: green;
 }}
 
+/* Novos estilos para componentes de alertas */
+.metric-container {{
+    background-color: var(--secondary-background-color);
+    border-radius: 8px;
+    padding: 15px;
+    margin: 5px;
+}}
+
+.metric-title {{
+    color: var(--accent-color);
+    font-size: 0.9rem;
+}}
+
+.metric-value {{
+    color: var(--primary-color);
+    font-size: 1.5rem;
+    font-weight: bold;
+}}
+
 
 </style>
 """
@@ -453,6 +472,52 @@ def save_forecast_to_db(forecast_df):
     except Exception as e:
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
+# --- Novas funções para alertas ---
+@st.cache_data(show_spinner=False)
+def get_alerts(start_date=None, end_date=None, route_id=None):
+    try:
+        conn = get_db_connection()
+        query = """
+            SELECT 
+                a.uuid, a.type, a.subtype, a.street,
+                a.location_x as longitude, 
+                a.location_y as latitude,
+                a.pubMillis as data,
+                a.reportRating as severidade,
+                a.confidence as confianca,
+                a.reliability as confiabilidade,
+                r.name as route_name
+            FROM alerts a
+            LEFT JOIN routes r ON ST_DWithin(
+                ST_MakePoint(a.location_x, a.location_y)::geography,
+                r.geom::geography, 500)  # Ajuste o raio em metros
+            WHERE 1=1
+        """
+        conditions = []
+        params = []
+
+        if start_date:
+            conditions.append("a.pubMillis >= %s")
+            params.append(pd.to_datetime(start_date).timestamp() * 1000)
+        if end_date:
+            conditions.append("a.pubMillis < %s")
+            params.append((pd.to_datetime(end_date) + pd.Timedelta(days=1)).timestamp() * 1000)
+        if route_id:
+            conditions.append("r.id = %s")
+            params.append(route_id)
+
+        if conditions:
+            query += " AND " + " AND ".join(conditions)
+
+        df = pd.read_sql(query, conn, params=params)
+        df['data'] = pd.to_datetime(df['data'], unit='ms')
+        return df
+        
+    except Exception as e:
+        st.error(f"Erro ao carregar alertas: {e}")
+        return pd.DataFrame()
+    
+
 def check_alerts(data):
     alerts = []
     for rule_name, rule in ALERT_RULES.items():
@@ -675,62 +740,66 @@ def main():
         if route in routes_info and not routes_info[route]['data'].empty:
             route_id = routes_info[route]['id']
             with st.expander(f"Mapa da Rota: {route}", expanded=True):
-                # Obter coordenadas da rota (cached)
+                # Obter coordenadas e alertas
                 route_coords = get_route_coordinates(route_id)
-
+                alerts_df = get_alerts(
+                    start_date=date_range_main[0],
+                    end_date=date_range_main[1],
+                    route_id=route_id
+                )
+                
+                # Criar mapa base
+                fig = go.Figure()
+                
+                # Adicionar rota
                 if not route_coords.empty:
-                    # Calcular bounds para centralizar o mapa
-                    min_lat, max_lat = route_coords['latitude'].min(), route_coords['latitude'].max()
-                    min_lon, max_lon = route_coords['longitude'].min(), route_coords['longitude'].max()
-
-                    # Adicionar um pequeno buffer
-                    lat_buffer = (max_lat - min_lat) * 0.05
-                    lon_buffer = (max_lon - min_lon) * 0.05
-
-                    center_lat = (max_lat + min_lat) / 2
-                    center_lon = (max_lon + min_lon) / 2
-
-                    # Determinar um zoom inicial razoável baseado nos bounds
-                    # Pode ser necessário ajustar esta lógica dependendo da escala das suas rotas
-                    zoom = 12 # Valor padrão
-
-                    fig = go.Figure(go.Scattermapbox(
+                    fig.add_trace(go.Scattermapbox(
                         mode="lines+markers",
                         lon=route_coords['longitude'],
                         lat=route_coords['latitude'],
-                        # CORRIGIDO: Use o valor hexadecimal da variável --accent-color
-                        marker={'size': 8, 'color': ACCENT_COLOR},
-                        # CORRIGIDO: Use o valor hexadecimal da variável --primary-color
+                        marker={'size': 8, 'color': PRIMARY_COLOR},
                         line=dict(width=4, color=PRIMARY_COLOR),
-                        hovertext=[f"Ponto {i+1}" for i in range(len(route_coords))],
-                        hoverinfo="text+lat+lon"
+                        name='Rota'
                     ))
+                
+                # Adicionar alertas
+                if not alerts_df.empty:
+                    fig.add_trace(go.Scattermapbox(
+                        mode="markers",
+                        lon=alerts_df['longitude'],
+                        lat=alerts_df['latitude'],
+                        marker={'size': 12, 'color': ACCENT_COLOR},
+                        text=alerts_df.apply(lambda row: f"{row['type']} - {row['subtype']}<br>Severidade: {row['severidade']}", axis=1),
+                        name='Alertas',
+                        hoverinfo='text'
+                    ))
+                
+                # Configurações finais do mapa
+                fig.update_layout(
+                    mapbox_style="carto-darkmatter",
+                    margin={"r":0,"t":0,"l":0,"b":0},
+                    height=500,
+                    showlegend=True
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Estatísticas de alertas
+                with st.container():
+                    cols = st.columns(3)
+                    cols[0].metric("Total de Alertas", len(alerts_df))
+                    cols[1].metric("Tipo Mais Comum", alerts_df['type'].mode()[0] if not alerts_df.empty else 'N/A')
+                    cols[2].metric("Severidade Média", f"{alerts_df['severidade'].mean():.1f}" if not alerts_df.empty else 'N/A')
 
-                    fig.update_layout(
-                        mapbox={
-                            'style': "carto-darkmatter", # Estilo de mapa que combina com o tema escuro
-                            'center': {'lat': center_lat, 'lon': center_lon},
-                            'zoom': zoom,
-                             # Bounds podem ajudar a focar na área, mas 'center' e 'zoom' são mais comuns
-                             'bounds': {'west': min_lon - lon_buffer, 'east': max_lon + lon_buffer,
-                                        'south': min_lat - lat_buffer, 'north': max_lat + lat_buffer}
-                        },
-                        margin={"r":0,"t":0,"l":0,"b":0},
-                        height=500, # Altura do mapa
-                        # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
-                        plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                        # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
-                        paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                        # CORRIGIDO: Use o valor hexadecimal da variável --text-color
-                        font=dict(color=TEXT_COLOR)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning(f"Nenhuma coordenada geográfica encontrada para a rota '{route}'.")
-        elif route in routes_info and 'error' in routes_info[route]:
-             st.warning(f"Mapa não disponível para '{route}' devido a erro no carregamento de dados.")
-
-
+# --- Processar alertas ---
+    alerts_df = pd.DataFrame()
+    if routes_to_process:
+        route_id = routes_info[routes_to_process[0]]['id']
+        alerts_df = get_alerts(
+            start_date=date_range_main[0],
+            end_date=date_range_main[1],
+            route_id=route_id
+            )
+        
     # --- Seção de Análise ---
     st.header("📈 Análise Preditiva")
     for route in routes_to_process:
