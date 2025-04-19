@@ -19,6 +19,19 @@ if np.__version__.startswith('2.'):
     np.bool_ = np.bool_
 
 st.set_page_config(page_title="Análise de Rotas", layout="wide")
+
+with st.sidebar:
+    st.title("ℹ️ Sobre")
+    st.markdown("""
+        Esta aplicação permite analisar a velocidade média em rotas específicas ao longo do tempo.
+        
+        - Use os filtros para selecionar o intervalo de análise.
+        - Veja previsões automáticas com ARIMA.
+        - Detecte anomalias e visualize tendências.
+
+        **Desenvolvido por [Seu Nome]**
+    """)
+
 st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 
 def get_data(start_date=None, end_date=None, route_id=None):
@@ -212,6 +225,9 @@ def main():
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    velocidade_prevista_media = arima_forecast['yhat'].mean()
+    st.markdown(f"📉 Velocidade média prevista nos próximos 30 minutos: **{velocidade_prevista_media:.2f} km/h**")
+
     save_forecast_to_db(arima_forecast)
 
     st.subheader("📉 Decomposição de Série Temporal")
@@ -219,6 +235,14 @@ def main():
 
     st.subheader("📊 Gráfico Interativo de Velocidade")
     plot_interactive_graph(processed_df, 'data', 'velocidade')
+
+    st.subheader("🌡️ Mapa de Calor de Velocidade por Hora e Dia da Semana")
+    heatmap_df = processed_df.groupby(['day_of_week', 'hour'])['velocidade'].mean().unstack()
+    heatmap_df = heatmap_df.reindex(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
+    fig, ax = plt.subplots(figsize=(12, 5))
+    sns.heatmap(heatmap_df, cmap="coolwarm", annot=True, fmt=".1f", linewidths=.5, ax=ax)
+    plt.title("Velocidade Média por Hora e Dia da Semana")
+    st.pyplot(fig)
 
     st.subheader("🚨 Detecção de Anomalias")
     anomalies = detect_anomalies(processed_df)
