@@ -9,6 +9,7 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
+import time
 
 # Compatibilidade com NumPy 2.x
 if np.__version__.startswith('2.'):
@@ -85,9 +86,13 @@ def seasonal_decomposition_plot(df):
 def create_arima_forecast(df):
     model = ARIMA(df['y'], order=(1, 1, 1))
     results = model.fit()
-    forecast = results.get_forecast(steps=10)
+    forecast = results.get_forecast(steps=20)  # número de passos que o modelo ARIMA vai prever
+
+    # Use o comprimento de 'predicted_mean' para definir o número de períodos
+    forecast_dates = pd.date_range(start=df['ds'].max(), periods=len(forecast.predicted_mean) + 1, freq='3min')[1:]
+
     return pd.DataFrame({
-        'ds': pd.date_range(start=df['ds'].max(), periods=22, freq='3min')[1:],
+        'ds': forecast_dates,
         'yhat': forecast.predicted_mean,
         'yhat_lower': forecast.conf_int().iloc[:, 0],
         'yhat_upper': forecast.conf_int().iloc[:, 1]
@@ -150,10 +155,10 @@ def main():
     date_start = pd.to_datetime(date_range[0])
     date_end = pd.to_datetime(date_range[1])
 
-    processed_df = processed_df[
-        (processed_df['data'] >= date_start) &
-        (processed_df['data'] <= date_end) &
-        (processed_df['velocidade'] >= min_speed) &
+    processed_df = processed_df[(
+        processed_df['data'] >= date_start) & 
+        (processed_df['data'] <= date_end) & 
+        (processed_df['velocidade'] >= min_speed) & 
         (processed_df['velocidade'] <= max_speed)
     ]
 
@@ -164,8 +169,7 @@ def main():
     # === PREVISÃO ARIMA ===
     st.subheader("🔮 Previsão de Velocidade (ARIMA)")
 
-    st.markdown("""
-    Este gráfico mostra a previsão de velocidade para os próximos 60 minutos (20 passos de 3 minutos) usando o modelo ARIMA.
+    st.markdown("""Este gráfico mostra a previsão de velocidade para os próximos 60 minutos (20 passos de 3 minutos) usando o modelo ARIMA.
     A linha laranja representa a previsão, enquanto a faixa sombreada mostra o intervalo de confiança da previsão.
     """)
 
@@ -259,6 +263,10 @@ def main():
         file_name='dados_filtrados.csv',
         mime='text/csv',
     )
+
+    # Atualizar a cada 5 minutos
+    time.sleep(300)  # Atraso de 5 minutos
+    st.experimental_rerun()  # Forçar o recarregamento da página
 
 if __name__ == "__main__":
     main()
