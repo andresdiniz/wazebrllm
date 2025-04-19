@@ -174,7 +174,6 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # database = "u335174317_wazeportal"
 
 # faz conexxão com o banco de dados MySQL (cached)
-@st.cache_resource(ttl=3600) # Cache a conexão do banco de dados por 1 hora
 def get_db_connection():
     try:
         conn = mysql.connector.connect(
@@ -189,7 +188,6 @@ def get_db_connection():
         st.stop() # Parar a execução se não conseguir conectar
 
 # Carregar apenas nomes das rotas (cached)
-@st.cache_data(ttl=3600) # Cache por 1 hora
 def get_all_route_names():
     mydb = None
     mycursor = None
@@ -208,7 +206,6 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão aqui se estiver usando @st.cache_resource
 
-@st.cache_data(ttl=600) # Cache por 10 minutos, dados podem mudar mais frequentemente
 def get_data(start_date=None, end_date=None, route_name=None):
     mydb = None
     mycursor = None
@@ -229,11 +226,18 @@ def get_data(start_date=None, end_date=None, route_name=None):
              conditions.append("r.name = %s")
              params.append(route_name)
         if start_date:
+            # Para a data de início, <= é correto se a hora for 00:00:00,
+            # ou >= se quisermos incluir o início do dia. >= é mais comum.
             conditions.append("hr.data >= %s")
             params.append(start_date)
         if end_date:
-            conditions.append("hr.data <= %s")
-            params.append(end_date)
+            # CORREÇÃO: Para incluir o último dia completo, filtrar por < (data final + 1 dia)
+            # Converte a string de data final para objeto datetime, adiciona 1 dia e converte de volta para string YYYY-MM-DD
+            end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+            end_date_plus_one_day_str = end_datetime.strftime('%Y-%m-%d') # Formatar como YYYY-MM-DD
+
+            conditions.append("hr.data < %s") # Usar o operador MENOR QUE (<)
+            params.append(end_date_plus_one_day_str) # Usar a data final + 1 dia
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -255,10 +259,8 @@ def get_data(start_date=None, end_date=None, route_name=None):
     finally:
         if mycursor:
             mycursor.close()
-        # Não feche a conexão aqui se estiver usando @st.cache_resource
 
 
-@st.cache_data(ttl=3600) # Cache por 1 hora, coordenadas não mudam
 def get_route_coordinates(route_id):
     mydb = None
     mycursor = None
@@ -375,7 +377,6 @@ def seasonal_decomposition_plot(df):
 
 
 # Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados)
-@st.cache_data(ttl=300) # Cache por 5 minutos para previsões
 def create_arima_forecast(df, route_id, steps=10):
     if df.empty:
         return pd.DataFrame()
@@ -452,6 +453,20 @@ def save_forecast_to_db(forecast_df):
     except Exception as e:
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
+def check_alerts(data):
+    alerts = []
+    for rule_name, rule in ALERT_RULES.items():
+        if rule['condition'](data).iloc[-1]:
+            alerts.append(rule['message'].format(data['route_name'].iloc[0]))
+    return alerts
+
+def simulate_scenario(base_data, parameters):
+    simulated = base_data.copy()
+    # Aplicar parâmetros de simulação
+    simulated['velocidade'] *= parameters.get('speed_factor', 1)
+    # Adicionar ruído
+    simulated['velocidade'] += np.random.normal(0, parameters.get('noise', 0))
+    return simulated
 
 def gerar_insights(df):
     insights = []
@@ -571,7 +586,7 @@ def main():
         with col_date1:
             date_range_main = st.date_input(
                 f"Período para '{route_name}'",
-                value=(pd.to_datetime('today') - pd.Timedelta(days=7).date(), pd.to_datetime('today').date()),
+                value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
                 max_value=pd.to_datetime('today').date(),
                 key=f"date_range_{route_name}"
             )
@@ -581,12 +596,17 @@ def main():
              with col_date2:
                  date_range_secondary = st.date_input(
                     f"Período para '{second_route}'",
-                    value=(pd.to_datetime('today') - pd.Timedelta(days=7).date(), pd.to_datetime('today').date()),
+                    value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
                     max_value=pd.to_datetime('today').date(),
                     key=f"date_range_{second_route}"
                 )
+                 # A validação de data final anterior à inicial já está logo abaixo, isso é bom
+                 # if date_range_secondary[0] > date_range_secondary[1]:
+                 #     st.error("Data final da rota secundária não pode ser anterior à data inicial.")
+                 #     st.stop()
 
-        # Validar as datas
+
+        # Validar as datas (este bloco já estava correto)
         if date_range_main and date_range_main[0] > date_range_main[1]:
             st.error("Data final da rota principal não pode ser anterior à data inicial")
             st.stop()
@@ -594,10 +614,8 @@ def main():
              st.error("Data final da rota secundária não pode ser anterior à data inicial.")
              st.stop()
 
-
     st.title("🚀 Análise de Rotas Inteligente")
     st.markdown("Selecione as rotas e o período de análise no painel lateral.")
-
 
     routes_info = {}
     routes_to_process = [route_name]
@@ -876,6 +894,14 @@ def main():
             else:
                  st.info(f"Dados para '{route}' não foram carregados ou processados.")
 
+                 # Exemplo de integração de alertas
+                 ALERT_RULES = {
+                    "congestion": {
+                        "condition": lambda df: df['velocidade'].rolling(4).mean() < 20,
+                        "duration": "15min",
+                        "message": "Congestionamento formando na rota {}"
+                    }
+                }
 
 if __name__ == "__main__":
     main()
