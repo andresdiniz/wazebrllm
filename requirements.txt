@@ -8,3 +8,4 @@ seaborn==0.12.2
 statsmodels==0.14.0
 plotly==5.15.0
 scipy==1.10.1
+kaleido
