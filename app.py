@@ -25,7 +25,6 @@ st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 
 # === CONEXÃO COM O BANCO DE DADOS ===
 # === CONEXÃO COM O BANCO DE DADOS ===
-# === CONEXÃO COM O BANCO DE DADOS ===
 def get_data():
     try:
         mydb = mysql.connector.connect(
@@ -51,6 +50,16 @@ def get_data():
         df = pd.DataFrame(results, columns=col_names)
         mycursor.close()
         mydb.close()
+
+        st.write("Tipos de dados lidos do banco:")
+        st.write(df.dtypes)
+
+        non_numeric_velocidade = pd.to_numeric(df['velocidade'], errors='coerce')
+        non_numeric_rows = df[non_numeric_velocidade.isna()]
+        if not non_numeric_rows.empty:
+            st.warning("Valores não numéricos encontrados na coluna 'velocidade' ao ler do banco:")
+            st.dataframe(non_numeric_rows)
+
         return df
     except Exception as e:
         st.error(f"Falha na conexão com o banco (usando mysql.connector): {str(e)}")
