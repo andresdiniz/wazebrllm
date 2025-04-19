@@ -571,7 +571,7 @@ def main():
         with col_date1:
             date_range_main = st.date_input(
                 f"Período para '{route_name}'",
-                value=(pd.to_datetime('today') - pd.Timedelta(days=7).date(), pd.to_datetime('today').date()),
+                value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
                 max_value=pd.to_datetime('today').date(),
                 key=f"date_range_{route_name}"
             )
@@ -581,12 +581,17 @@ def main():
              with col_date2:
                  date_range_secondary = st.date_input(
                     f"Período para '{second_route}'",
-                    value=(pd.to_datetime('today') - pd.Timedelta(days=7).date(), pd.to_datetime('today').date()),
+                    value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
                     max_value=pd.to_datetime('today').date(),
                     key=f"date_range_{second_route}"
                 )
+                 # A validação de data final anterior à inicial já está logo abaixo, isso é bom
+                 # if date_range_secondary[0] > date_range_secondary[1]:
+                 #     st.error("Data final da rota secundária não pode ser anterior à data inicial.")
+                 #     st.stop()
 
-        # Validar as datas
+
+        # Validar as datas (este bloco já estava correto)
         if date_range_main and date_range_main[0] > date_range_main[1]:
             st.error("Data final da rota principal não pode ser anterior à data inicial")
             st.stop()
@@ -594,10 +599,8 @@ def main():
              st.error("Data final da rota secundária não pode ser anterior à data inicial.")
              st.stop()
 
-
     st.title("🚀 Análise de Rotas Inteligente")
     st.markdown("Selecione as rotas e o período de análise no painel lateral.")
-
 
     routes_info = {}
     routes_to_process = [route_name]
