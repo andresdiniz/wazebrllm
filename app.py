@@ -26,7 +26,7 @@ st.set_page_config(page_title="Análise de Rotas", layout="wide")
 st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 
 # === CONEXÃO COM O BANCO DE DADOS ===
-def get_data():
+def get_data(start_date=None, end_date=None, route_id=None):
     try:
         mydb = mysql.connector.connect(
             host="185.213.81.52",
@@ -43,8 +43,20 @@ def get_data():
                 hr.velocidade
             FROM historic_routes hr
             JOIN routes r ON hr.route_id = r.id
-            ORDER BY hr.data ASC
         """
+        conditions = []
+        if start_date:
+            conditions.append(f"hr.data >= '{start_date}'")
+        if end_date:
+            conditions.append(f"hr.data <= '{end_date}'")
+        if route_id:
+            conditions.append(f"hr.route_id = {route_id}")
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY hr.data ASC"
+
         mycursor.execute(query)
         results = mycursor.fetchall()
         col_names = [desc[0] for desc in mycursor.description]
@@ -168,7 +180,16 @@ def gerar_insights(df):
 
 # === INTERFACE PRINCIPAL ===
 def main():
-    raw_df = get_data()
+    raw_df_all_routes = get_data()
+    route_name = st.selectbox("Selecione a rota:", raw_df_all_routes['route_name'].unique())
+    route_id = raw_df_all_routes[raw_df_all_routes['route_name'] == route_name]['route_id'].unique()[0]
+
+    st.subheader("🔎 Filtros")
+    date_range = st.date_input("Intervalo de datas", [pd.to_datetime('today') - pd.Timedelta(days=7), pd.to_datetime('today')])
+    date_start = date_range[0].strftime('%Y-%m-%d')
+    date_end = date_range[1].strftime('%Y-%m-%d')
+
+    raw_df = get_data(start_date=date_start, end_date=date_end, route_id=route_id)
 
     with st.expander("📋 Visualizar dados brutos"):
         st.dataframe(raw_df)
