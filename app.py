@@ -120,18 +120,11 @@ def create_arima_forecast(df, route_id):
     # Define o fuso horário de São Paulo (GMT-3)
     sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
 
-    # Converte a coluna 'ds' para datetime com fuso horário UTC (se for naive)
-    if df['ds'].dt.tz is None:
-        df['ds'] = pd.to_datetime(df['ds']).dt.tz_localize('UTC')
+    # Pega o último timestamp DOS DADOS LIMPOS (antes de qualquer manipulação de tz na previsão)
+    last_timestamp_utc = pd.to_datetime(df['ds'].max())
 
-    # Converte a coluna 'ds' para o fuso horário de São Paulo
-    df['ds_local'] = df['ds'].dt.tz_convert(sao_paulo_tz)
-
-    # Pega o último timestamp no fuso horário local
-    last_timestamp_local = df['ds_local'].max()
-
-    # Gera as datas futuras com o fuso horário de São Paulo
-    future_timestamps = pd.date_range(start=last_timestamp_local, periods=len(forecast.predicted_mean) + 1, freq='3min', tz=sao_paulo_tz)[1:]
+    # Gera as datas futuras JÁ NO fuso horário de São Paulo
+    future_timestamps = pd.date_range(start=last_timestamp_utc, periods=len(forecast.predicted_mean) + 1, freq='3min', tz='America/Sao_Paulo')[1:]
 
     forecast_df = pd.DataFrame({
         'ds': future_timestamps,
