@@ -453,66 +453,6 @@ def save_forecast_to_db(forecast_df):
     except Exception as e:
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
-# --- Novas funções para alertas ---
-@st.cache_data(show_spinner=False)
-def get_alerts(start_date=None, end_date=None, route_id=None):
-    try:
-        conn = get_db_connection()
-        query = """
-            SELECT 
-                a.uuid, a.type, a.subtype, a.street,
-                a.location_x as longitude, 
-                a.location_y as latitude,
-                a.pubMillis as data,
-                a.reportRating as severidade,
-                a.confidence as confianca,
-                a.reliability as confiabilidade,
-                r.name as route_name
-            FROM alerts a
-            LEFT JOIN routes r ON ST_DWithin(
-                ST_MakePoint(a.location_x, a.location_y)::geography,
-                r.geom::geography, 500)  # Ajuste o raio em metros
-            WHERE 1=1
-        """
-        conditions = []
-        params = []
-
-        if start_date:
-            conditions.append("a.pubMillis >= %s")
-            params.append(pd.to_datetime(start_date).timestamp() * 1000)
-        if end_date:
-            conditions.append("a.pubMillis < %s")
-            params.append((pd.to_datetime(end_date) + pd.Timedelta(days=1)).timestamp() * 1000)
-        if route_id:
-            conditions.append("r.id = %s")
-            params.append(route_id)
-
-        if conditions:
-            query += " AND " + " AND ".join(conditions)
-
-        df = pd.read_sql(query, conn, params=params)
-        df['data'] = pd.to_datetime(df['data'], unit='ms')
-        return df
-        
-    except Exception as e:
-        st.error(f"Erro ao carregar alertas: {e}")
-        return pd.DataFrame()
-    
-
-def check_alerts(data):
-    alerts = []
-    for rule_name, rule in ALERT_RULES.items():
-        if rule['condition'](data).iloc[-1]:
-            alerts.append(rule['message'].format(data['route_name'].iloc[0]))
-    return alerts
-
-def simulate_scenario(base_data, parameters):
-    simulated = base_data.copy()
-    # Aplicar parâmetros de simulação
-    simulated['velocidade'] *= parameters.get('speed_factor', 1)
-    # Adicionar ruído
-    simulated['velocidade'] += np.random.normal(0, parameters.get('noise', 0))
-    return simulated
 
 def gerar_insights(df):
     insights = []
@@ -940,14 +880,6 @@ def main():
             else:
                  st.info(f"Dados para '{route}' não foram carregados ou processados.")
 
-                 # Exemplo de integração de alertas
-                 ALERT_RULES = {
-                    "congestion": {
-                        "condition": lambda df: df['velocidade'].rolling(4).mean() < 20,
-                        "duration": "15min",
-                        "message": "Congestionamento formando na rota {}"
-                    }
-                }
 
 if __name__ == "__main__":
     main()
