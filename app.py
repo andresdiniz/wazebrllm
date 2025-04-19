@@ -596,448 +596,211 @@ def gerar_insights(df):
 def main():
     # Verificar se as secrets do banco de dados estão configuradas
     if "mysql" not in st.secrets or not all(k in st.secrets["mysql"] for k in ("host", "user", "password", "database")):
-        st.error("As credenciais do banco de dados não foram configuradas corretamente no secrets.toml.")
-        st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` com as informações de conexão do MySQL.")
-        st.stop() # Parar a execução
+        st.error("As credenciais do banco de dados não foram configuradas corretamente.")
+        st.stop()
 
-    with st.sidebar:
-        st.title("ℹ️ Painel de Controle")
-        st.markdown("""
-            Configure a análise de rotas aqui.
-
-            **Funcionalidades:**
-            - Visualize dados históricos de velocidade
-            - Detecte padrões de tráfego (heatmap, decomposição)
-            - Obtenha insights automáticos sobre a rota
-            - Previsão de velocidade para o futuro próximo
-            - Compare a análise entre diferentes rotas
-        """)
-
-        st.subheader("Seleção de Rotas")
-        # Carregar nomes das rotas de forma eficiente (cached)
-        all_route_names = get_all_route_names()
-        if not all_route_names:
-             st.warning("Não foi possível carregar os nomes das rotas do banco de dados ou não há rotas disponíveis.")
-             st.stop() # Parar se não houver rotas
-
-        # Usar índice para garantir que o selectbox não quebre se o nome da rota mudar ou não existir
-        try:
-            default_main_route_index = all_route_names.index(st.session_state.get("main_route_select", all_route_names[0]))
-        except ValueError:
-             default_main_route_index = 0 # Usar o primeiro se o valor armazenado não for válido
-
-        route_name = st.selectbox(
-            "Rota Principal:",
-            all_route_names,
-            index=default_main_route_index,
-            key="main_route_select"
-        )
-
-        compare_enabled = st.checkbox("Comparar com outra rota", key="compare_checkbox")
-        second_route = None
-        if compare_enabled:
-            available_for_comparison = [r for r in all_route_names if r != route_name]
-            if available_for_comparison:
-                 # Usar índice para a rota secundária também
-                 try:
-                     default_secondary_route_index = available_for_comparison.index(st.session_state.get("secondary_route_select", available_for_comparison[0]))
-                 except ValueError:
-                      default_secondary_route_index = 0
-
-                 second_route = st.selectbox(
-                     "Rota Secundária:",
-                     available_for_comparison,
-                     index=default_secondary_route_index,
-                     key="secondary_route_select"
-                 )
-            else:
-                 st.info("Não há outras rotas disponíveis para comparação.")
-                 compare_enabled = False # Desabilita comparação se não houver outras rotas
-
-
-        st.subheader("Período de Análise")
-        # Usar um seletor de data por rota para flexibilidade na comparação de períodos diferentes
-        col_date1, col_date2 = st.columns(2)
-        with col_date1:
-            date_range_main = st.date_input(
-                f"Período para '{route_name}'",
-                value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
-                max_value=pd.to_datetime('today').date(),
-                key=f"date_range_{route_name}"
-            )
-
-        date_range_secondary = None
-        if compare_enabled and second_route:
-             with col_date2:
-                 date_range_secondary = st.date_input(
-                    f"Período para '{second_route}'",
-                    value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
-                    max_value=pd.to_datetime('today').date(),
-                    key=f"date_range_{second_route}"
-                )
-                 # A validação de data final anterior à inicial já está logo abaixo, isso é bom
-                 # if date_range_secondary[0] > date_range_secondary[1]:
-                 #     st.error("Data final da rota secundária não pode ser anterior à data inicial.")
-                 #     st.stop()
-
-
-        # Validar as datas (este bloco já estava correto)
-        if date_range_main and date_range_main[0] > date_range_main[1]:
-            st.error("Data final da rota principal não pode ser anterior à data inicial")
-            st.stop()
-        if compare_enabled and date_range_secondary and date_range_secondary[0] > date_range_secondary[1]:
-             st.error("Data final da rota secundária não pode ser anterior à data inicial.")
-             st.stop()
-
-    st.title("🚀 Análise de Rotas Inteligente")
-    st.markdown("Selecione as rotas e o período de análise no painel lateral.")
-
+    # Inicialização de variáveis importantes
+    routes_to_process = []
     routes_info = {}
-    routes_to_process = [route_name]
-    if compare_enabled and second_route:
-        routes_to_process.append(second_route)
 
-    # --- Carregamento e Processamento de Dados ---
-    st.header("⏳ Processando Dados...")
-    for route in routes_to_process:
-        date_range = date_range_main if route == route_name else date_range_secondary
-        if date_range is None: # Caso a comparação esteja habilitada, mas a rota secundária não tenha range
-             continue
+    try:
+        with st.sidebar:
+            st.title("ℹ️ Painel de Controle")
+            st.markdown("Configure a análise de rotas aqui.")
 
-        start_date = date_range[0].strftime('%Y-%m-%d')
-        end_date = date_range[1].strftime('%Y-%m-%d')
+            # Carregar nomes das rotas
+            all_route_names = get_all_route_names()
+            if not all_route_names:
+                st.error("Nenhuma rota encontrada no banco de dados!")
+                st.stop()
 
-        with st.spinner(f'Carregando e processando dados para {route} de {start_date} a {end_date}...'):
-            # Carregar dados filtrando por nome da rota e período (cached)
-            raw_df, error = get_data(
-                start_date=start_date,
-                end_date=end_date,
-                route_name=route
+            # Seleção de rotas
+            main_route = st.selectbox(
+                "Rota Principal:",
+                all_route_names,
+                index=0,
+                key="main_route_select"
             )
 
-            if error:
-                st.error(f"Erro ao carregar dados para {route}: {error}")
-                routes_info[route] = {'data': pd.DataFrame(), 'id': None, 'error': error}
-                continue # Pula para a próxima rota se houver erro
-
-            if raw_df.empty:
-                st.warning(f"Nenhum dado encontrado para a rota '{route}' no período de {start_date} a {end_date}. Por favor, ajuste o intervalo de datas.")
-                routes_info[route] = {'data': pd.DataFrame(), 'id': None}
-                continue # Pula para a próxima rota
-
-            # Obter o ID da rota (assumindo que há apenas um ID por nome no período selecionado)
-            route_id = raw_df['route_id'].iloc[0]
-
-            # Limpar e processar os dados
-            processed_df = clean_data(raw_df)
-
-            routes_info[route] = {
-                'data': processed_df,
-                'id': route_id
-            }
-        st.success(f"Dados para {route} carregados e processados ({len(processed_df)} registros).")
-
-    # --- Seção de Visualização ---
-
-    # Se não houver dados carregados para nenhuma rota, parar por aqui
-    if not routes_info or all(info['data'].empty for info in routes_info.values()):
-         st.info("Selecione as rotas e um período com dados disponíveis no painel lateral para continuar.")
-         return # Sai da função main se não houver dados
-
-
-    st.header("🗺️ Visualização Geográfica")
-for route in routes_to_process:
-    if route in routes_info and not routes_info[route]['data'].empty:
-        route_id = routes_info[route]['id']
-        with st.expander(f"Mapa da Rota: {route}", expanded=True):
-            route_coords = get_route_coordinates(route_id)
-            
-            # Carregar alertas com filtro espacial
-            alerts_df = get_alerts(
-                start_date=date_range_main[0],
-                end_date=date_range_main[1],
-                route_coords=route_coords
-            )
-
-            # Criar mapa
-            fig = go.Figure()
-
-            # Adicionar rota
-            if not route_coords.empty:
-                fig.add_trace(go.Scattermapbox(
-                    mode="lines+markers",
-                    lon=route_coords['longitude'],
-                    lat=route_coords['latitude'],
-                    marker={'size': 8, 'color': PRIMARY_COLOR},
-                    line=dict(width=4, color=PRIMARY_COLOR),
-                    name='Rota'
-                ))
-
-            # Adicionar alertas
-            if not alerts_df.empty:
-                fig.add_trace(go.Scattermapbox(
-                    mode="markers",
-                    lon=alerts_df['longitude'],
-                    lat=alerts_df['latitude'],
-                    marker={'size': 12, 'color': ACCENT_COLOR},
-                    text=alerts_df.apply(
-                        lambda row: f"<b>{row['type']}</b><br>{row['subtype']}<br>Severidade: {row['severidade']}",
-                        axis=1
-                    ),
-                    hoverinfo='text',
-                    name='Alertas'
-                ))
-
-            # Configurar layout
-            fig.update_layout(
-                mapbox_style="carto-darkmatter",
-                margin={"r":0,"t":0,"l":0,"b":0},
-                height=500,
-                showlegend=True
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Estatísticas
-            if not alerts_df.empty:
-                st.subheader("📊 Estatísticas de Alertas")
-                cols = st.columns(3)
-                cols[0].metric("Total de Alertas", len(alerts_df))
-                cols[1].metric("Tipo Mais Comum", alerts_df['type'].mode()[0])
-                cols[2].metric("Severidade Média", f"{alerts_df['severidade'].mean():.1f}")
-
-# --- Processar alertas ---
-    st.header("🚨 Análise Detalhada de Alertas")
-    if not alerts_df.empty:
-        with st.expander("Filtros Avançados", expanded=True):
-            col1, col2, col3 = st.columns(3)
-            selected_type = col1.selectbox("Tipo de Alerta", ['Todos'] + list(alerts_df['type'].unique()))
-            selected_subtype = col2.selectbox("Subtipo", ['Todos'] + list(alerts_df['subtype'].unique()))
-            min_severity = col3.slider("Severidade Mínima", 0, 5, 0)
-
-        # Aplicar filtros
-        filtered_alerts = alerts_df.copy()
-        if selected_type != 'Todos':
-            filtered_alerts = filtered_alerts[filtered_alerts['type'] == selected_type]
-        if selected_subtype != 'Todos':
-            filtered_alerts = filtered_alerts[filtered_alerts['subtype'] == selected_subtype]
-        filtered_alerts = filtered_alerts[filtered_alerts['severidade'] >= min_severity]
-
-        # Visualizações
-        tab1, tab2, tab3 = st.tabs(["Tabela", "Distribuição Temporal", "Heatmap"])
-
-        with tab1:
-            st.dataframe(
-                filtered_alerts[['data', 'type', 'subtype', 'severidade', 'street']],
-                column_config={
-                    "data": "Data/Hora",
-                    "type": "Tipo",
-                    "subtype": "Subtipo",
-                    "severidade": "Severidade",
-                    "street": "Local"
-                },
-                height=300
-            )
-
-        with tab2:
-            fig = px.histogram(
-                filtered_alerts,
-                x='data',
-                nbins=24,
-                color='type',
-                title='Alertas por Hora',
-                labels={'data': 'Horário', 'count': 'Alertas'},
-                color_discrete_sequence=[PRIMARY_COLOR, ACCENT_COLOR]
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        with tab3:
-            pivot = filtered_alerts.pivot_table(
-                index=filtered_alerts['data'].dt.hour,
-                columns=filtered_alerts['data'].dt.day,
-                values='uuid',
-                aggfunc='count'
-            )
-            fig, ax = plt.subplots(figsize=(12, 6))
-            sns.heatmap(pivot, cmap="YlOrRd", ax=ax)
-            ax.set_title("Densidade de Alertas por Hora e Dia")
-            ax.set_xlabel("Dia")
-            ax.set_ylabel("Hora do Dia")
-            st.pyplot(fig)
-
-    else:
-        st.info("Nenhum alerta encontrado para o período selecionado")
-        
-    # --- Seção de Análise ---
-    st.header("📈 Análise Preditiva")
-    for route in routes_to_process:
-        if route in routes_info and not routes_info[route]['data'].empty:
-            processed_df = routes_info[route]['data']
-            route_id = routes_info[route]['id']
-
-            with st.expander(f"Análise para {route}", expanded=True):
-
-                st.subheader("🧠 Insights Automáticos")
-                st.markdown(gerar_insights(processed_df))
-
-                st.subheader("📉 Decomposição Temporal")
-                # Passa o df processado que clean_data retornou
-                seasonal_decomposition_plot(processed_df)
-
-                st.subheader("🔥 Heatmap Horário por Dia da Semana")
-                if not processed_df.empty:
-                    pivot_table = processed_df.pivot_table(
-                        index='day_of_week',
-                        columns='hour',
-                        values='velocidade',
-                        aggfunc='mean'
+            # Configuração de comparação
+            compare_enabled = st.checkbox("Comparar com outra rota", key="compare_checkbox")
+            second_route = None
+            if compare_enabled:
+                available_routes = [r for r in all_route_names if r != main_route]
+                if available_routes:
+                    second_route = st.selectbox(
+                        "Rota Secundária:",
+                        available_routes,
+                        index=0,
+                        key="secondary_route_select"
                     )
-
-                    # Reordenar dias da semana (em português se preferir, mas mantive inglês para o código)
-                    dias_ordenados_eng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                    # Mapeamento para português se quiser exibir no gráfico
-                    dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
-                    dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
-
-                    # Reindexar a tabela pivotada
-                    pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                    pivot_table.index = pivot_table.index.map(dia_mapping) # Renomear índice para português
-
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    # Usar cmap que funcione bem em fundo escuro
-                    sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="viridis", ax=ax) # 'viridis' ou 'plasma' ou 'cividis'
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_title("Velocidade Média por Dia da Semana e Hora", color=TEXT_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_xlabel("Hora do Dia", color=TEXT_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_ylabel("Dia da Semana", color=TEXT_COLOR)
-                    # Ajustar cor dos ticks e labels
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.tick_params(axis='x', colors=TEXT_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.tick_params(axis='y', colors=TEXT_COLOR)
-                    # Mudar cor do background do plot
-                    # CORRIGIDO: Usar a cor do tema
-                    fig.patch.set_facecolor(SECONDARY_BACKGROUND_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_facecolor(SECONDARY_BACKGROUND_COLOR)
-                    st.pyplot(fig)
                 else:
-                     st.info("Dados insuficientes para gerar o Heatmap.")
+                    st.warning("Nenhuma outra rota disponível para comparação")
+                    compare_enabled = False
 
+            # Seleção de período
+            st.subheader("Período de Análise")
+            date_range = st.date_input(
+                "Selecione o período:",
+                value=[pd.to_datetime('today') - pd.Timedelta(days=7), pd.to_datetime('today')],
+                key="date_range"
+            )
 
-                st.subheader("🔮 Previsão de Velocidade (Modelo ARIMA)")
-                # Certificar que o DataFrame tem dados e foi limpo
-                if not processed_df.empty:
-                     # A frequência da série temporal é 3 minutos, baseada na coleta
-                     # O key do slider precisa ser único por rota
-                     steps = st.slider(f"⏱️ Passos de previsão para '{route}' (3min cada)", 5, 60, 10, key=f"steps_{route}")
+            # Validar datas
+            if len(date_range) != 2:
+                st.error("Selecione um intervalo de datas válido")
+                st.stop()
+                
+            if date_range[0] > date_range[1]:
+                st.error("A data final não pode ser anterior à data inicial")
+                st.stop()
 
-                     # Criar previsão (cached)
-                     arima_forecast = create_arima_forecast(processed_df, route_id, steps)
+        # Configurar rotas para processamento
+        routes_to_process = [main_route]
+        if compare_enabled and second_route:
+            routes_to_process.append(second_route)
 
-                     if not arima_forecast.empty:
-                         fig = go.Figure()
-
-                         # Adicionar dados históricos
-                         fig.add_trace(go.Scatter(
-                             x=processed_df['data'],
-                             y=processed_df['velocidade'],
-                             mode='lines',
-                             name='Histórico',
-                             # CORRIGIDO: Use o valor hexadecimal da variável --primary-color
-                             line=dict(color=PRIMARY_COLOR, width=2)
-                         ))
-
-                         # Adicionar previsão
-                         fig.add_trace(go.Scatter(
-                             x=arima_forecast['ds'],
-                             y=arima_forecast['yhat'],
-                             mode='lines',
-                             name='Previsão',
-                             # CORRIGIDO: Use o valor hexadecimal da variável --accent-color
-                             line=dict(color=ACCENT_COLOR, width=2, dash='dash')
-                         ))
-
-                         # Adicionar intervalo de confiança
-                         # Usando a cor baseada no primary color com transparência
-                         fill_color_rgba = f'rgba({int(PRIMARY_COLOR[1:3], 16)}, {int(PRIMARY_COLOR[3:5], 16)}, {int(PRIMARY_COLOR[5:7], 16)}, 0.2)'
-
-                         fig.add_trace(go.Scatter(
-                             x=arima_forecast['ds'].tolist() + arima_forecast['ds'][::-1].tolist(), # Datas para preencher a área
-                             y=arima_forecast['yhat_upper'].tolist() + arima_forecast['yhat_lower'][::-1].tolist(), # Limites para preencher a área
-                             fill='toself',
-                             # CORRIGIDO: Use a cor RGBA baseada no tema
-                             fillcolor=fill_color_rgba,
-                             line=dict(color='rgba(255,255,255,0)'), # Linha transparente
-                             name='Intervalo de Confiança (95%)',
-                             showlegend=True
-                         ))
-
-                         fig.update_layout(
-                             title=f"Histórico e Previsão para {route}",
-                             xaxis_title="Data e Hora",
-                             yaxis_title="Velocidade (km/h)",
-                             hovermode='x unified', # Melhorar hover
-                             # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
-                             plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                             # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
-                             paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                             # CORRIGIDO: Use o valor hexadecimal da variável --text-color
-                             font=dict(color=TEXT_COLOR),
-                             # Manter as cores do grid em cinza, combinam com o tema escuro
-                             xaxis=dict(showgrid=True, gridcolor='#555'),
-                             yaxis=dict(showgrid=True, gridcolor='#555'),
-                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1) # Posicionar legenda
-                         )
-                         st.plotly_chart(fig)
-
-                         # Botão para salvar a previsão (key precisa ser única por rota)
-                         if st.button(f"💾 Salvar Última Previsão para '{route}'", key=f"save_forecast_{route}"):
-                              save_forecast_to_db(arima_forecast)
-
-                     else:
-                         st.info("Não foi possível gerar a previsão para esta rota e período. Verifique se há dados históricos suficientes.")
-                else:
-                     st.info("Dados insuficientes para rodar a análise de previsão para esta rota e período.")
-
-        elif route in routes_info and 'error' in routes_info[route]:
-             st.warning(f"Análise preditiva não disponível para '{route}' devido a erro no carregamento de dados.")
-
-
-    # --- Seção Técnica ---
-    st.header("⚙️ Detalhes Técnicos")
-    with st.expander("Relatório de Qualidade de Dados"):
+        # --- Carregamento e Processamento de Dados ---
+        st.title("🚀 Análise de Rotas Inteligente")
+        st.header("⏳ Processando Dados...")
+        
         for route in routes_to_process:
-            # Verificar se a rota foi processada e não teve erro de carga fatal
-            if route in routes_info and 'error' not in routes_info[route]:
-                st.subheader(f"Qualidade dos Dados: {route}")
-                processed_df = routes_info[route]['data']
+            with st.spinner(f'Carregando dados para {route}...'):
+                raw_df, error = get_data(
+                    start_date=date_range[0],
+                    end_date=date_range[1],
+                    route_name=route
+                )
 
-                if not processed_df.empty:
-                    report = {
-                        "total_registros_carregados_periodo": len(processed_df),
-                        "registros_velocidade_nulos_apos_limpeza": processed_df['velocidade'].isnull().sum(), # Deve ser 0 se o ffill/bfill funcionou
-                        # anomaly detection needs to be implemented and used if desired in the report
-                        # "outliers_detectados": len(detect_anomalies(processed_df)), # Usar se a detecção de anomalias for usada
-                        "cobertura_temporal": f"{processed_df['data'].min().strftime('%Y-%m-%d %H:%M')} a {processed_df['data'].max().strftime('%Y-%m-%d %H:%M')}" if not processed_df.empty else "N/A"
-                    }
-                    st.json(report)
-                else:
-                     st.info(f"Não há dados processados para gerar relatório de qualidade para '{route}'.")
-            elif route in routes_info and 'error' in routes_info[route]:
-                 st.warning(f"Relatório de qualidade não disponível para '{route}' devido a erro no carregamento de dados: {routes_info[route]['error']}")
-            else:
-                 st.info(f"Dados para '{route}' não foram carregados ou processados.")
+                if error:
+                    st.error(f"Erro na rota {route}: {error}")
+                    continue
 
-                 # Exemplo de integração de alertas
-                 ALERT_RULES = {
-                    "congestion": {
-                        "condition": lambda df: df['velocidade'].rolling(4).mean() < 20,
-                        "duration": "15min",
-                        "message": "Congestionamento formando na rota {}"
-                    }
+                if raw_df.empty:
+                    st.warning(f"Nenhum dado encontrado para {route}")
+                    continue
+
+                # Processar dados
+                route_id = raw_df['route_id'].iloc[0]
+                processed_df = clean_data(raw_df)
+                routes_info[route] = {
+                    'data': processed_df,
+                    'id': route_id,
+                    'coords': get_route_coordinates(route_id)
                 }
+
+        # Verificar se há dados válidos
+        if not routes_info:
+            st.error("Nenhum dado válido encontrado para análise")
+            st.stop()
+
+        # --- Seção de Visualização Geográfica ---
+        st.header("🗺️ Visualização Geográfica")
+        for route, data in routes_info.items():
+            with st.expander(f"Mapa: {route}", expanded=True):
+                # Criar mapa
+                fig = go.Figure()
+                
+                # Adicionar rota
+                if not data['coords'].empty:
+                    fig.add_trace(go.Scattermapbox(
+                        mode="lines",
+                        lon=data['coords']['longitude'],
+                        lat=data['coords']['latitude'],
+                        line=dict(width=4, color=PRIMARY_COLOR),
+                        name='Rota'
+                    ))
+
+                # Carregar e plotar alertas
+                alerts_df = get_alerts(
+                    start_date=date_range[0],
+                    end_date=date_range[1],
+                    route_coords=data['coords']
+                )
+                
+                if not alerts_df.empty:
+                    fig.add_trace(go.Scattermapbox(
+                        mode="markers",
+                        lon=alerts_df['longitude'],
+                        lat=alerts_df['latitude'],
+                        marker=dict(size=10, color=ACCENT_COLOR),
+                        text=alerts_df['type'] + " - " + alerts_df['subtype'],
+                        name='Alertas'
+                    ))
+
+                # Configurar layout do mapa
+                fig.update_layout(
+                    mapbox_style="carto-darkmatter",
+                    margin={"r":0,"t":0,"l":0,"b":0},
+                    height=500,
+                    showlegend=True
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        # --- Seção de Análise Preditiva ---
+        st.header("📈 Análise de Desempenho")
+        for route, data in routes_info.items():
+            with st.expander(f"Análise para {route}", expanded=True):
+                # Insights e visualizações
+                st.subheader("🧠 Insights Automáticos")
+                st.markdown(gerar_insights(data['data']))
+                
+                # Previsão ARIMA
+                st.subheader("🔮 Previsão de Velocidade")
+                steps = st.slider(f"Horizonte de previsão (minutos)", 15, 120, 60, key=f"steps_{route}")
+                
+                if st.button(f"Gerar Previsão para {route}"):
+                    forecast = create_arima_forecast(data['data'], data['id'], steps)
+                    if not forecast.empty:
+                        # Plotar gráfico de previsão
+                        fig = go.Figure()
+                        fig.add_trace(go.Scatter(
+                            x=data['data']['data'],
+                            y=data['data']['velocidade'],
+                            name='Histórico'
+                        ))
+                        fig.add_trace(go.Scatter(
+                            x=forecast['ds'],
+                            y=forecast['yhat'],
+                            name='Previsão',
+                            line=dict(dash='dot')
+                        ))
+                        st.plotly_chart(fig)
+
+        # --- Seção de Alertas ---
+        st.header("🚨 Análise de Alertas")
+        if not alerts_df.empty:
+            with st.expander("Detalhes dos Alertas", expanded=True):
+                # Filtros interativos
+                col1, col2 = st.columns(2)
+                selected_type = col1.selectbox("Tipo de Alerta", ['Todos'] + list(alerts_df['type'].unique()))
+                min_severity = col2.slider("Severidade Mínima", 0, 5, 0)
+
+                # Aplicar filtros
+                filtered_alerts = alerts_df.copy()
+                if selected_type != 'Todos':
+                    filtered_alerts = filtered_alerts[filtered_alerts['type'] == selected_type]
+                filtered_alerts = filtered_alerts[filtered_alerts['severidade'] >= min_severity]
+
+                # Exibir resultados
+                st.dataframe(filtered_alerts)
+        else:
+            st.info("Nenhum alerta encontrado no período selecionado")
+
+        # --- Seção Técnica ---
+        st.header("⚙️ Detalhes Técnicos")
+        with st.expander("Relatório de Qualidade de Dados"):
+            for route, data in routes_info.items():
+                st.subheader(f"Relatório para {route}")
+                st.json({
+                    "registros_processados": len(data['data']),
+                    "periodo_cobertura": f"{data['data']['data'].min()} a {data['data']['data'].max()}",
+                    "alertas_associados": len(alerts_df[alerts_df['route_name'] == route])
+                })
+
+    except Exception as e:
+        st.error(f"Erro crítico na aplicação: {str(e)}")
+        st.stop()
 
 if __name__ == "__main__":
     main()
