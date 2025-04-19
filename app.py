@@ -10,6 +10,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
 import time
+import mysql.connector
+
 
 # Compatibilidade com NumPy 2.x
 if np.__version__.startswith('2.'):
@@ -26,7 +28,13 @@ st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 # === CONEXÃO COM O BANCO DE DADOS ===
 def get_data():
     try:
-        engine = create_engine('mysql+mysqlconnector://u335174317_wazeportal:%40Ndre2025.@185.213.81.52/u335174317_wazeportal')
+        mydb = mysql.connector.connect(
+            host="185.213.81.52",
+            user="u335174317_wazeportal",
+            password="%40Ndre2025.",
+            database="u335174317_wazeportal"
+        )
+        mycursor = mydb.cursor()
         query = """
             SELECT
                 hr.route_id,
@@ -37,10 +45,15 @@ def get_data():
             JOIN routes r ON hr.route_id = r.id
             ORDER BY hr.data ASC
         """
-        df = pd.read_sql(query, engine)  # Passa a engine diretamente para o pandas
+        mycursor.execute(query)
+        results = mycursor.fetchall()
+        col_names = [desc[0] for desc in mycursor.description]
+        df = pd.DataFrame(results, columns=col_names)
+        mycursor.close()
+        mydb.close()
         return df
     except Exception as e:
-        st.error(f"Falha na conexão com o banco: {str(e)}")
+        st.error(f"Falha na conexão com o banco (usando mysql.connector): {str(e)}")
         st.stop()
 
 # === LIMPEZA E FEATURE ENGINEERING ===
