@@ -265,9 +265,17 @@ def main():
 
     st.subheader("📥 Baixar Gráfico de Previsão")
     buffer = BytesIO()
-    fig.write_image(buffer, format='png')
-    buffer.seek(0)
-    st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
+
+    try:
+        # Tenta gerar a imagem do gráfico
+        fig.write_image(buffer, format='png')
+        buffer.seek(0)
+        st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
+    except Exception as e:
+        # Se ocorrer qualquer erro, exibe uma mensagem
+        st.warning("Não foi possível baixar o gráfico devido a um erro. Tente novamente mais tarde.")
+        st.error(f"Erro: {str(e)}")
+
 
     st.markdown("### 📉 Tendência Geral de Velocidade")
     trend_df = processed_df.copy()
