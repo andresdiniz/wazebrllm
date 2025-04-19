@@ -93,11 +93,10 @@ def clean_data(df, route):
     df['hour'] = df['data'].dt.hour
     return df.dropna(subset=['velocidade'])
 
-def detect_anomalies(df):
-    df = df.copy()
-    df['vel_diff'] = df['velocidade'].diff().abs()
-    threshold = df['vel_diff'].quantile(0.95) * 1.5
-    return df[df['vel_diff'] > max(threshold, 20)]
+def detect_anomalies_iforest(df):
+    clf = IsolationForest(contamination=0.05)
+    df['anomaly'] = clf.fit_predict(df[['velocidade']])
+    return df[df['anomaly'] == -1]
 
 def plot_interactive_graph(df, x_col, y_col):
     if 'data' not in df.columns:
