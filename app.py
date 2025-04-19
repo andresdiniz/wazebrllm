@@ -13,12 +13,10 @@ import time
 import mysql.connector
 import pytz  # Importe a biblioteca pytz para trabalhar com fusos horários
 
-
-
 # Compatibilidade com NumPy 2.x
 if np.__version__.startswith('2.'):
     np.float_ = np.float64
-    np.int_ = np.int64
+    np.int_ = np.int_
     np.bool_ = np.bool_
 
 # === CONFIGURAÇÕES INICIAIS ===
@@ -125,27 +123,44 @@ def seasonal_decomposition_plot(df):
 
 # === PREVISÃO COM ARIMA ===
 def create_arima_forecast(df, route_id):
-    model = ARIMA(df['y'], order=(1, 1, 1))
-    results = model.fit()
-    forecast = results.get_forecast(steps=20)
+    # Experimentando com uma ordem diferente do ARIMA
+    # Você pode tentar outras ordens como (5, 1, 0), (0, 1, 3), (2, 1, 2) etc.
+    # A escolha da ordem ideal geralmente envolve análise da função de autocorrelação (ACF) e função de autocorrelação parcial (PACF).
+    try:
+        model = ARIMA(df['y'], order=(3, 1, 1))
+        results = model.fit()
+        # Reduzindo o número de passos da previsão para 10 (30 minutos)
+        forecast = results.get_forecast(steps=10)
 
-    # Define o fuso horário de São Paulo (GMT-3)
-    sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
+        # Define o fuso horário de São Paulo (GMT-3)
+        sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
 
-    # Pega o último timestamp DOS DADOS LIMPOS (antes de qualquer manipulação de tz na previsão)
-    last_timestamp_utc = pd.to_datetime(df['ds'].max())
+        # Pega o último timestamp DOS DADOS LIMPOS (antes de qualquer manipulação de tz na previsão)
+        last_timestamp_utc = pd.to_datetime(df['ds'].max())
 
-    # Gera as datas futuras JÁ NO fuso horário de São Paulo
-    future_timestamps = pd.date_range(start=last_timestamp_utc, periods=len(forecast.predicted_mean) + 1, freq='3min', tz='America/Sao_Paulo')[1:]
+        # Gera as datas futuras JÁ NO fuso horário de São Paulo
+        future_timestamps = pd.date_range(start=last_timestamp_utc, periods=len(forecast.predicted_mean) + 1, freq='3min', tz='America/Sao_Paulo')[1:]
 
-    forecast_df = pd.DataFrame({
-        'ds': future_timestamps,
-        'yhat': forecast.predicted_mean,
-        'yhat_lower': forecast.conf_int().iloc[:, 0],
-        'yhat_upper': forecast.conf_int().iloc[:, 1]
-    })
-    forecast_df['id_route'] = route_id
-    return forecast_df
+        forecast_df = pd.DataFrame({
+            'ds': future_timestamps,
+            'yhat': forecast.predicted_mean,
+            'yhat_lower': forecast.conf_int().iloc[:, 0],
+            'yhat_upper': forecast.conf_int().iloc[:, 1]
+        })
+        forecast_df['id_route'] = route_id
+        return forecast_df
+    except Exception as e:
+        st.warning(f"Erro ao treinar o modelo ARIMA: {e}. Retornando uma previsão simples.")
+        # Em caso de erro, retorna uma previsão mais simples para evitar quebrar o app
+        last_value = df['y'].iloc[-1]
+        future_timestamps = pd.date_range(start=pd.to_datetime(df['ds'].max()), periods=11, freq='3min', tz='America/Sao_Paulo')[1:]
+        return pd.DataFrame({
+            'ds': future_timestamps,
+            'yhat': [last_value] * 10,
+            'yhat_lower': [last_value - 5] * 10,
+            'yhat_upper': [last_value + 5] * 10,
+            'id_route': [route_id] * 10
+        })
 
 # === SALVAR PREVISÃO NO BANCO ===
 def save_forecast_to_db(forecast_df):
@@ -229,7 +244,7 @@ def main():
     # === PREVISÃO ARIMA ===
     st.subheader("🔮 Previsão de Velocidade (ARIMA)")
 
-    st.markdown("""Este gráfico mostra a previsão de velocidade para os próximos 60 minutos (20 passos de 3 minutos) usando o modelo ARIMA.
+    st.markdown("""Este gráfico mostra a previsão de velocidade para os próximos 30 minutos (10 passos de 3 minutos) usando o modelo ARIMA.
     A linha laranja representa a previsão, enquanto a faixa sombreada mostra o intervalo de confiança da previsão.
     """)
 
@@ -305,7 +320,7 @@ def main():
         )
     else:
         st.success("Nenhuma anomalia significativa detectada.")
-
+        
     # === DOWNLOAD DO GRÁFICO DE PREVISÃO ===
     buffer = BytesIO()
     fig.write_image(buffer, format='png')
