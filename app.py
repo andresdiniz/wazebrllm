@@ -11,6 +11,8 @@ import plotly.graph_objects as go
 from io import BytesIO
 import time
 import mysql.connector
+import pytz  # Importe a biblioteca pytz para trabalhar com fusos horários
+
 
 
 # Compatibilidade com NumPy 2.x
@@ -115,7 +117,14 @@ def create_arima_forecast(df, route_id):
     results = model.fit()
     forecast = results.get_forecast(steps=20)
 
-    forecast_dates = pd.date_range(start=df['ds'].max(), periods=len(forecast.predicted_mean) + 1, freq='3min')[1:]
+    # Define o fuso horário de São Paulo (GMT-3)
+    sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
+
+    # Localiza o último timestamp para o fuso horário de São Paulo
+    last_timestamp_local = pd.to_datetime(df['ds'].max()).tz_localize('UTC').tz_convert(sao_paulo_tz)
+
+    # Gera as datas futuras com o fuso horário de São Paulo
+    forecast_dates = pd.date_range(start=last_timestamp_local, periods=len(forecast.predicted_mean) + 1, freq='3min', tz=sao_paulo_tz)[1:]
 
     forecast_df = pd.DataFrame({
         'ds': forecast_dates,
@@ -123,7 +132,7 @@ def create_arima_forecast(df, route_id):
         'yhat_lower': forecast.conf_int().iloc[:, 0],
         'yhat_upper': forecast.conf_int().iloc[:, 1]
     })
-    forecast_df['id_route'] = route_id  # Adiciona a coluna id_route
+    forecast_df['id_route'] = route_id
     return forecast_df
 
 # === SALVAR PREVISÃO NO BANCO ===
