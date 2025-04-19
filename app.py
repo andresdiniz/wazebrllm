@@ -56,8 +56,7 @@ h1, h2, h3 {
 """
 st.markdown(custom_theme, unsafe_allow_html=True)
 
-# Cache para recursos
-@st.cache_resource
+# faz conexxão com o banco de dados MySQL
 def get_db_connection():
     return mysql.connector.connect(
         host="185.213.81.52",
@@ -66,7 +65,6 @@ def get_db_connection():
         database="u335174317_wazeportal"
     )
 
-@st.cache_data(ttl=3600)
 def get_data(start_date=None, end_date=None, route_id=None):
     try:
         mydb = get_db_connection()
@@ -347,6 +345,26 @@ def main():
 
             st.subheader("📉 Decomposição Temporal")
             seasonal_decomposition_plot(processed_df)
+
+            st.subheader("🔥 Heatmap Horário por Dia da Semana")
+            pivot_table = processed_df.pivot_table(
+                index='day_of_week',
+                columns='hour',
+                values='velocidade',
+                aggfunc='mean'
+            )
+
+            # Reordenar dias da semana
+            dias_ordenados = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            pivot_table = pivot_table.reindex(dias_ordenados)
+
+            fig, ax = plt.subplots(figsize=(12, 6))
+            sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="YlGnBu", ax=ax)
+            ax.set_title("Velocidade Média por Dia da Semana e Hora")
+            ax.set_xlabel("Hora do Dia")
+            ax.set_ylabel("Dia da Semana")
+            st.pyplot(fig)
+
 
     # Seção Técnica
     st.header("⚙️ Detalhes Técnicos")
