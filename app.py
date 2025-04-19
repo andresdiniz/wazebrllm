@@ -34,23 +34,46 @@ TIMEZONE = pytz.timezone('America/Sao_Paulo')
 custom_theme = """
 <style>
 :root {
-    --primary-color: #1E90FF;
-    --background-color: #F0F2F6;
+    --primary-color: #007BFF;
+    --background-color: #F9FAFC;
     --secondary-background-color: #FFFFFF;
-    --text-color: #262730;
+    --accent-color: #17A2B8;
+    --text-color: #343A40;
+    --header-font: 'Segoe UI', sans-serif;
+}
+
+html, body, [class*="css"] {
+    font-family: var(--header-font);
+    color: var(--text-color);
+    background-color: var(--background-color);
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: var(--primary-color);
+    font-weight: 600;
 }
 
 .stApp {
     background-color: var(--background-color);
-    color: var(--text-color);
 }
 
 .stSidebar {
     background-color: var(--secondary-background-color) !important;
+    color: var(--text-color);
 }
 
-h1, h2, h3 {
-    color: var(--primary-color) !important;
+.stButton>button {
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 8px;
+}
+
+.stCheckbox>label {
+    color: var(--text-color);
+}
+
+.stSelectbox>label {
+    color: var(--text-color);
 }
 </style>
 """
@@ -161,7 +184,7 @@ def seasonal_decomposition_plot(df):
 
 def create_arima_forecast(df, route_id, steps=10):
     try:
-        model = auto_arima(df['y'], seasonal=True, m=24,
+        model = auto_arima(df['y'], seasonal=True, m=480,
                           error_action='ignore', suppress_warnings=True)
         forecast = model.predict(n_periods=steps)
         
@@ -359,7 +382,7 @@ def main():
             pivot_table = pivot_table.reindex(dias_ordenados)
 
             fig, ax = plt.subplots(figsize=(12, 6))
-            sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="YlGnBu", ax=ax)
+            sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="coolwarm_r", ax=ax)
             ax.set_title("Velocidade Média por Dia da Semana e Hora")
             ax.set_xlabel("Hora do Dia")
             ax.set_ylabel("Dia da Semana")
