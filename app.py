@@ -29,6 +29,7 @@ with st.sidebar:
         - Use os filtros para selecionar o intervalo de análise.
         - Veja previsões automáticas com ARIMA.
         - Detecte anomalias e visualize tendências.
+        - Visualize o mapa completo da rota selecionada.
 
         **Desenvolvido por [Seu Nome]**
     """)
@@ -77,6 +78,26 @@ def get_data(start_date=None, end_date=None, route_id=None):
         return df, None
     except Exception as e:
         return None, str(e)
+
+def get_route_coordinates(route_id):
+    try:
+        mydb = mysql.connector.connect(
+            host="185.213.81.52",
+            user="u335174317_wazeportal",
+            password="@Ndre2025.",
+            database="u335174317_wazeportal"
+        )
+        mycursor = mydb.cursor()
+        query = "SELECT x, y FROM route_lines WHERE route_id = %s ORDER BY id"
+        mycursor.execute(query, (route_id,))
+        results = mycursor.fetchall()
+        df = pd.DataFrame(results, columns=['x', 'y'])
+        mycursor.close()
+        mydb.close()
+        return df
+    except Exception as e:
+        st.error(f"Erro ao obter coordenadas: {e}")
+        return pd.DataFrame()
 
 def clean_data(df, route):
     df = df[df['route_name'] == route].copy()
@@ -178,6 +199,38 @@ def main():
     route_name = st.selectbox("Selecione a rota:", raw_df_all_routes['route_name'].unique())
     route_id = raw_df_all_routes[raw_df_all_routes['route_name'] == route_name]['route_id'].unique()[0]
 
+    # Seção do Mapa da Rota
+    st.subheader("🗺️ Mapa da Rota")
+    route_coords = get_route_coordinates(route_id)
+    
+    if not route_coords.empty:
+        map_center = {
+            "lat": route_coords['x'].mean(),
+            "lon": route_coords['y'].mean()
+        }
+        
+        fig = go.Figure(go.Scattermapbox(
+            mode = "lines+markers",
+            lon = route_coords['x'],
+            lat = route_coords['y'],
+            marker = {'size': 8, 'color': "#FF0000"},
+            line = dict(width=2, color='#1E90FF')
+        ))
+        
+        fig.update_layout(
+            mapbox = {
+                'style': "open-street-map",
+                'center': map_center,
+                'zoom': 13
+            },
+            margin = {"r":0,"t":0,"l":0,"b":0},
+            height=500
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Nenhuma coordenada encontrada para esta rota.")
+
+    # Restante da aplicação
     st.subheader("🔎 Filtros")
     date_range = st.date_input("Intervalo de datas", [pd.to_datetime('today') - pd.Timedelta(days=7), pd.to_datetime('today')])
     date_start = date_range[0].strftime('%Y-%m-%d')
@@ -267,15 +320,12 @@ def main():
     buffer = BytesIO()
 
     try:
-        # Tenta gerar a imagem do gráfico
         fig.write_image(buffer, format='png')
         buffer.seek(0)
         st.download_button("Baixar gráfico", buffer, file_name="forecast_plot.png")
     except Exception as e:
-        # Se ocorrer qualquer erro, exibe uma mensagem
         st.warning("Não foi possível baixar o gráfico devido a um erro. Tente novamente mais tarde.")
         st.error(f"Erro: {str(e)}")
-
 
     st.markdown("### 📉 Tendência Geral de Velocidade")
     trend_df = processed_df.copy()
