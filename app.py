@@ -110,20 +110,21 @@ def seasonal_decomposition_plot(df):
     st.pyplot(fig)
 
 # === PREVISÃO COM ARIMA ===
-def create_arima_forecast(df):
+def create_arima_forecast(df, route_id):
     model = ARIMA(df['y'], order=(1, 1, 1))
     results = model.fit()
-    forecast = results.get_forecast(steps=20)  # número de passos que o modelo ARIMA vai prever
+    forecast = results.get_forecast(steps=20)
 
-    # Use o comprimento de 'predicted_mean' para definir o número de períodos
     forecast_dates = pd.date_range(start=df['ds'].max(), periods=len(forecast.predicted_mean) + 1, freq='3min')[1:]
 
-    return pd.DataFrame({
+    forecast_df = pd.DataFrame({
         'ds': forecast_dates,
         'yhat': forecast.predicted_mean,
         'yhat_lower': forecast.conf_int().iloc[:, 0],
         'yhat_upper': forecast.conf_int().iloc[:, 1]
     })
+    forecast_df['id_route'] = route_id  # Adiciona a coluna id_route
+    return forecast_df
 
 # === SALVAR PREVISÃO NO BANCO ===
 def save_forecast_to_db(forecast_df):
@@ -164,6 +165,7 @@ def main():
         st.dataframe(raw_df)
 
     route_name = st.selectbox("Selecione a rota:", raw_df['route_name'].unique())
+    route_id = raw_df[raw_df['route_name'] == route_name]['route_id'].unique()[0]
     processed_df = clean_data(raw_df, route_name)
 
     if len(processed_df) < 20:
@@ -212,7 +214,7 @@ def main():
 
     arima_df_display = arima_df[-display_limit:] if len(arima_df) > display_limit else arima_df.copy()
 
-    arima_forecast = create_arima_forecast(arima_df)
+    arima_forecast = create_arima_forecast(arima_df,route_id)
 
     # === GRÁFICO INTERATIVO COM PLOTLY
     fig = go.Figure()
