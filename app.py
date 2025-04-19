@@ -284,9 +284,14 @@ def main():
             disabled=not compare
         ) if compare else None
         
-        st.date_input("Período de Análise", 
-                     value=(pd.to_datetime('today')-pd.Timedelta(days=7), 
-                     key="date_range")
+        st.date_input(
+            "Período de Análise",
+            value=(
+                (pd.to_datetime('today') - pd.Timedelta(days=7)).date(), # Data inicial (7 dias atrás como objeto date)
+                pd.to_datetime('today').date() # Data final (hoje como objeto date)
+            ),
+            key="date_range"
+        )
 
     # Carregamento de dados
     routes_data = {}
