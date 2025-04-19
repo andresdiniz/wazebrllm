@@ -120,14 +120,21 @@ def create_arima_forecast(df, route_id):
     # Define o fuso horário de São Paulo (GMT-3)
     sao_paulo_tz = pytz.timezone('America/Sao_Paulo')
 
-    # Localiza o último timestamp para o fuso horário de São Paulo
-    last_timestamp_local = pd.to_datetime(df['ds'].max()).tz_localize('UTC').tz_convert(sao_paulo_tz)
+    # Converte a coluna 'ds' para datetime com fuso horário UTC (se for naive)
+    if df['ds'].dt.tz is None:
+        df['ds'] = pd.to_datetime(df['ds']).dt.tz_localize('UTC')
+
+    # Converte a coluna 'ds' para o fuso horário de São Paulo
+    df['ds_local'] = df['ds'].dt.tz_convert(sao_paulo_tz)
+
+    # Pega o último timestamp no fuso horário local
+    last_timestamp_local = df['ds_local'].max()
 
     # Gera as datas futuras com o fuso horário de São Paulo
-    forecast_dates = pd.date_range(start=last_timestamp_local, periods=len(forecast.predicted_mean) + 1, freq='3min', tz=sao_paulo_tz)[1:]
+    future_timestamps = pd.date_range(start=last_timestamp_local, periods=len(forecast.predicted_mean) + 1, freq='3min', tz=sao_paulo_tz)[1:]
 
     forecast_df = pd.DataFrame({
-        'ds': forecast_dates,
+        'ds': future_timestamps,
         'yhat': forecast.predicted_mean,
         'yhat_lower': forecast.conf_int().iloc[:, 0],
         'yhat_upper': forecast.conf_int().iloc[:, 1]
