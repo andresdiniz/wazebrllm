@@ -22,20 +22,23 @@ st.set_page_config(page_title="Análise de Rotas", layout="wide")
 st.title("📊 Previsão de Velocidade e Análise de Anomalias")
 
 # === CONEXÃO COM O BANCO DE DADOS ===
+# === CONEXÃO COM O BANCO DE DADOS ===
 def get_data():
     try:
         engine = create_engine('mysql+mysqlconnector://u335174317_wazeportal:%40Ndre2025.@185.213.81.52/u335174317_wazeportal')
-        query = """
-            SELECT 
-                hr.route_id,
-                r.name AS route_name,
-                hr.data,
-                hr.velocidade
-            FROM historic_routes hr
-            JOIN routes r ON hr.route_id = r.id
-            ORDER BY hr.data ASC
-        """
-        return pd.read_sql(query, engine)
+        with engine.connect() as connection:  # Abre uma conexão
+            query = """
+                SELECT
+                    hr.route_id,
+                    r.name AS route_name,
+                    hr.data,
+                    hr.velocidade
+                FROM historic_routes hr
+                JOIN routes r ON hr.route_id = r.id
+                ORDER BY hr.data ASC
+            """
+            df = pd.read_sql(query, connection)  # Passa a conexão para o read_sql
+        return df
     except Exception as e:
         st.error(f"Falha na conexão com o banco: {str(e)}")
         st.stop()
@@ -99,10 +102,12 @@ def create_arima_forecast(df):
     })
 
 # === SALVAR PREVISÃO NO BANCO ===
+# === SALVAR PREVISÃO NO BANCO ===
 def save_forecast_to_db(forecast_df):
     try:
         engine = create_engine('mysql+mysqlconnector://u335174317_wazeportal:%40Ndre2025.@185.213.81.52/u335174317_wazeportal')
-        forecast_df.to_sql('forecast_history', con=engine, if_exists='append', index=False)
+        with engine.begin() as connection:  # Abre uma conexão (transação implícita com begin)
+            forecast_df.to_sql('forecast_history', con=connection, if_exists='append', index=False)
     except Exception as e:
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
