@@ -824,15 +824,39 @@ def main():
                     dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
                     dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
 
-                    # Reindexar a tabela pivotada
+                    # Reindexar a tabela pivotada para garantir a ordem dos dias
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                    # Renomear índice para português apenas para exibição no gráfico
+                    # Renomear índice para português (isso será uma coluna no melted df)
                     pivot_table.index = pivot_table.index.map(dia_mapping)
 
-                    # --- Plotly Heatmap Code (Substitui o Seaborn/Matplotlib aqui) ---
+                    # --- NOVO: Converter a tabela pivotada para o formato "long" para Plotly ---
+                    # Resetar o índice para transformar os dias em uma coluna
+                    pivot_table_reset = pivot_table.reset_index()
+                    pivot_table_reset = pivot_table_reset.rename(columns={'index': 'Dia da Semana'}) # Nomeia a nova coluna de índice
+
+                    # Derreter o DataFrame
+                    melted_heatmap_data = pivot_table_reset.melt(
+                        id_vars=['Dia da Semana'],        # Coluna(s) para manter como identificadores
+                        var_name='Hora do Dia',          # Nome para a nova coluna que contém os nomes das antigas colunas (horas)
+                        value_name='Velocidade Média'    # Nome para a nova coluna que contém os valores
+                    )
+
+                    # Garantir que a coluna de hora seja numérica (Plotly gosta disso para eixos numéricos)
+                    melted_heatmap_data['Hora do Dia'] = pd.to_numeric(melted_heatmap_data['Hora do Dia'])
+
+                    # Opcional: Ordenar os dados derretidos para garantir a ordem no gráfico, embora Plotly geralmente gerencie isso
+                    # com base nos tipos de dados e ordem no DataFrame. A reindexação anterior já ajuda.
+                    # melted_heatmap_data = melted_heatmap_data.sort_values(by=['Dia da Semana', 'Hora do Dia'])
+
+
+                    # --- Plotly Heatmap Code usando dados derretidos ---
+                    # Agora especificamos explicitamente x, y, e z
                     fig_heatmap = px.heatmap(
-                        pivot_table,
-                        text_auto=".1f", # Mostra o valor dentro da célula (opcional)
+                        melted_heatmap_data,
+                        x='Hora do Dia',
+                        y='Dia da Semana',
+                        z='Velocidade Média', # Use a coluna de valores
+                        text_auto=True,       # Mostra o valor dentro da célula (opcional) - Plotly 5.x+
                         aspect="auto",
                         title="Velocidade Média por Dia da Semana e Hora",
                         color_continuous_scale="Viridis" # Use o mesmo cmap ou similar ao viridis
@@ -847,17 +871,14 @@ def main():
                         paper_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do papel (figura)
                         font=dict(color=TEXT_COLOR) # Cor da fonte global do gráfico
                     )
-                    # Configurar cor do texto dos valores dentro do heatmap (se text_auto for True)
-                    # Pode ser tricky com plotly express text_auto, pode precisar ajustar cores do template global ou adicionar manualmente
-                    # Por enquanto, confiamos que o plotly escolhe uma cor visível automaticamente.
+                    # O tooltip com o valor aparece por padrão ao passar o mouse com px.heatmap quando x, y, z são especificados
+
 
                     # Exibe o gráfico Plotly no Streamlit
-                    # O tooltip com o valor aparece por padrão ao passar o mouse com px.heatmap
                     st.plotly_chart(fig_heatmap, use_container_width=True)
 
                 else:
                     st.info("Dados insuficientes para gerar o Heatmap.")
-
 
                 st.subheader("🔮 Previsão de Velocidade (ARIMA)")
                 # Adicionar controle para o número de passos da previsão
