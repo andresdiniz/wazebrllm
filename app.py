@@ -87,14 +87,57 @@ h1, h2, h3, h4, h5, h6 {{
     color: var(--text-color); /* Garante que o texto geral do app use a cor definida */
 }}
 
+/* --- Ajustes específicos para a sidebar (MELHORADOS) --- */
 .stSidebar {{
-    background-color: var(--secondary-background-color) !important;
-    color: var(--text-color);
+    background-color: var(--secondary-background-color) !important; /* Garantir fundo escuro */
+    color: var(--text-color); /* Cor do texto geral na sidebar (herdado) */
 }}
 
 .stSidebar .stMarkdown {{
      color: var(--text-color); /* Garante que o markdown na sidebar use a cor definida */
 }}
+
+/* Melhorar aparência de elementos de input e labels dentro da sidebar */
+.stSidebar label {{ /* Alvo: todos os labels dentro da sidebar (checkbox, selectbox, slider, date input, etc.) */
+    color: var(--text-color);
+}}
+
+.stSidebar div[data-baseweb="select"] > div {{ /* Alvo: texto interno de selectbox */
+     background-color: var(--secondary-background-color);
+     color: var(--text-color);
+     border: 1px solid #555;
+}}
+
+.stSidebar input[type="text"], /* Alvo: inputs de texto */
+.stSidebar input[type="date"], /* Alvo: inputs de data */
+.stSidebar input[type="number"] /* Alvo: inputs numéricos */
+{{
+    color: var(--text-color);
+    background-color: var(--secondary-background-color);
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 5px;
+}}
+
+.stSidebar .stSlider [data-baseweb="slider"] > div {{ /* Alvo: barra preenchida do slider */
+    background-color: var(--primary-color);
+}}
+
+.stSidebar .stRadio > label {{ /* Alvo: labels de radio buttons */
+     color: var(--text-color);
+}}
+
+/* Garantir que o texto dos botões na sidebar seja visível */
+/* Adicione !important se a herança estiver causando problemas */
+.stSidebar button {{
+    color: white !important; /* Força a cor do texto do botão para branco */
+}}
+
+/* Adicionar regras para outros elementos comuns na sidebar se necessário */
+/* st.text_area, st.time_input, etc. */
+
+/* --- Fim ajustes sidebar --- */
+
 
 .stButton>button {{
     background-color: var(--primary-color);
@@ -116,7 +159,7 @@ h1, h2, h3, h4, h5, h6 {{
 .stSelectbox>label {{
     color: var(--text-color);
 }}
-/* Melhorar aparência do selectbox */
+/* Melhorar aparência do selectbox - Regra global */
 .stSelectbox > div[data-baseweb="select"] > div {{
      background-color: var(--secondary-background-color);
      color: var(--text-color);
@@ -124,7 +167,7 @@ h1, h2, h3, h4, h5, h6 {{
 }}
 
 
-/* Melhorar aparência do date input */
+/* Melhorar aparência do date input - Regra global */
 .stDateInput > label {{
     color: var(--text-color);
 }}
@@ -137,7 +180,7 @@ h1, h2, h3, h4, h5, h6 {{
     padding: 5px;
 }}
 
-/* Melhorar aparência do slider */
+/* Melhorar aparência do slider - Regra global */
 .stSlider > label {{
     color: var(--text-color);
 }}
@@ -145,6 +188,7 @@ h1, h2, h3, h4, h5, h6 {{
 .stSlider [data-baseweb="slider"] > div {{
     background-color: var(--primary-color); /* Cor da barra preenchida */
 }}
+
 
 .stSpinner > div > div {{
     color: var(--primary-color); /* Cor do spinner */
