@@ -747,19 +747,8 @@ def main():
                 # Passa o df processado que clean_data retornou
                 seasonal_decomposition_plot(processed_df)
 
-                with st.expander(f"Análise para {route}", expanded=True):
-
-                st.subheader("🧠 Insights Automáticos")
-                # Assuming gerar_insights handles processed_df
-                st.markdown(gerar_insights(processed_df))
-
-                st.subheader("📉 Decomposição Temporal")
-                # Assuming seasonal_decomposition_plot handles processed_df
-                seasonal_decomposition_plot(processed_df)
-
                 st.subheader("🔥 Heatmap Horário por Dia da Semana")
                 if not processed_df.empty:
-                    # Seu código para criar a tabela pivotada
                     pivot_table = processed_df.pivot_table(
                         index='day_of_week',
                         columns='hour',
@@ -767,34 +756,38 @@ def main():
                         aggfunc='mean'
                     )
 
-                    # Reordenar dias da semana (em português)
+                    # Reordenar dias da semana (em português se preferir, mas mantive inglês para o código)
                     dias_ordenados_eng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    # Mapeamento para português se quiser exibir no gráfico
                     dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
                     dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
 
-                    # Reindexar a tabela pivotada e renomear índice
+                    # Reindexar a tabela pivotada
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                    pivot_table.index = pivot_table.index.map(dia_mapping)
+                    pivot_table.index = pivot_table.index.map(dia_mapping) # Renomear índice para português
 
-                    # --- Código Plotly para Heatmap Interativo com Tooltip ---
-                    fig_plotly = px.heatmap(
-                        pivot_table,
-                        text_auto=".1f", # Mostra o valor dentro da célula (opcional, mas similar ao seu annot=True)
-                        aspect="auto",
-                        title="Velocidade Média por Dia da Semana e Hora"
-                    )
-
-                    # O Plotly Express geralmente adiciona tooltips automaticamente mostrando
-                    # os valores do eixo X, eixo Y e o valor da cor/célula ao passar o mouse.
-                    # Você pode personalizar o hovertext com fig_plotly.update_traces(hovertemplate=...)
-                    # se precisar de um formato diferente, mas o padrão já mostra o valor.
-
-
-                    # Exibe o gráfico Plotly no Streamlit
-                    st.plotly_chart(fig_plotly, use_container_width=True)
-
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    # Usar cmap que funcione bem em fundo escuro
+                    sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="viridis", ax=ax) # 'viridis' ou 'plasma' ou 'cividis'
+                    # CORRIGIDO: Usar a cor do tema
+                    ax.set_title("Velocidade Média por Dia da Semana e Hora", color=TEXT_COLOR)
+                    # CORRIGIDO: Usar a cor do tema
+                    ax.set_xlabel("Hora do Dia", color=TEXT_COLOR)
+                    # CORRIGIDO: Usar a cor do tema
+                    ax.set_ylabel("Dia da Semana", color=TEXT_COLOR)
+                    # Ajustar cor dos ticks e labels
+                    # CORRIGIDO: Usar a cor do tema
+                    ax.tick_params(axis='x', colors=TEXT_COLOR)
+                    # CORRIGIDO: Usar a cor do tema
+                    ax.tick_params(axis='y', colors=TEXT_COLOR)
+                    # Mudar cor do background do plot
+                    # CORRIGIDO: Usar a cor do tema
+                    fig.patch.set_facecolor(SECONDARY_BACKGROUND_COLOR)
+                    # CORRIGIDO: Usar a cor do tema
+                    ax.set_facecolor(SECONDARY_BACKGROUND_COLOR)
+                    st.pyplot(fig)
                 else:
-                    st.info("Dados insuficientes para gerar o Heatmap.")
+                     st.info("Dados insuficientes para gerar o Heatmap.")
 
 
                 st.subheader("🔮 Previsão de Velocidade (Modelo ARIMA)")
