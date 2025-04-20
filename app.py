@@ -22,7 +22,8 @@ import pytz
 from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
 import datetime # Importar datetime para manipular datas
-import plotly
+import plotly # Importar o módulo plotly completo para verificar a versão
+
 
 # Configurações de compatibilidade do numpy (manter se for necessário no seu ambiente)
 # Isso pode não ser necessário dependendo da versão do numpy, mas é seguro manter
@@ -538,6 +539,14 @@ def main():
         st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` na raiz do seu projeto com as informações de conexão do MySQL.")
         st.stop() # Parar a execução
 
+    # --- DIAGNÓSTICO: Verificar a versão do Plotly ---
+    try:
+        st.write(f"DEBUG: Plotly version: {plotly.__version__}")
+    except Exception as e:
+        st.error(f"DEBUG: Não foi possível verificar a versão do Plotly: {e}")
+    # --- FIM DIAGNÓSTICO ---
+
+
     with st.sidebar:
         st.title("ℹ️ Painel de Controle")
         st.markdown("""
@@ -882,6 +891,21 @@ def main():
                     # st.write("DEBUG (Heatmap Data): melted_heatmap_data describe():", melted_heatmap_data.describe()) # Descomente se precisar de estatísticas
                     st.write("DEBUG (Heatmap Data): melted_heatmap_data isnull().sum():", melted_heatmap_data.isnull().sum())
                     # --- FIM DIAGNÓSTICO FINAL ---
+
+                    # --- DIAGNÓSTICO: Teste rápido de Heatmap ---
+                    st.write("DEBUG: Tentando teste rápido de px.heatmap com dados fictícios...")
+                    try:
+                        dummy_df = pd.DataFrame({
+                            'Col X': [1, 2, 1, 2],
+                            'Col Y': ['A', 'A', 'B', 'B'],
+                            'Valor Z': [10, 20, 30, 40]
+                        })
+                        dummy_fig = px.heatmap(dummy_df, x='Col X', y='Col Y', z='Valor Z', title='Teste Heatmap Fictício')
+                        # st.plotly_chart(dummy_fig) # Descomente se quiser ver o gráfico de teste
+                        st.write("DEBUG: Teste rápido de px.heatmap com dados fictícios BEM-SUCEDIDO.")
+                    except Exception as e:
+                        st.error(f"DEBUG: Teste rápido de px.heatmap com dados fictícios FALHOU: {e}")
+                    # --- FIM DIAGNÓSTICO ---
 
 
                     # --- Plotly Heatmap Code usando dados derretidos ---
