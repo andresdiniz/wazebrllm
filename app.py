@@ -750,52 +750,52 @@ def main():
                 st.subheader("🔥 Heatmap Horário por Dia da Semana")
                 with st.expander(f"Análise para {route}", expanded=True):
 
-            st.subheader("🧠 Insights Automáticos")
-            # Assuming gerar_insights handles processed_df
-            st.markdown(gerar_insights(processed_df))
+                st.subheader("🧠 Insights Automáticos")
+                # Assuming gerar_insights handles processed_df
+                st.markdown(gerar_insights(processed_df))
 
-            st.subheader("📉 Decomposição Temporal")
-            # Assuming seasonal_decomposition_plot handles processed_df
-            seasonal_decomposition_plot(processed_df)
+                st.subheader("📉 Decomposição Temporal")
+                # Assuming seasonal_decomposition_plot handles processed_df
+                seasonal_decomposition_plot(processed_df)
 
-            st.subheader("🔥 Heatmap Horário por Dia da Semana")
-            if not processed_df.empty:
-                # Seu código para criar a tabela pivotada
-                pivot_table = processed_df.pivot_table(
-                    index='day_of_week',
-                    columns='hour',
-                    values='velocidade',
-                    aggfunc='mean'
-                )
+                st.subheader("🔥 Heatmap Horário por Dia da Semana")
+                if not processed_df.empty:
+                    # Seu código para criar a tabela pivotada
+                    pivot_table = processed_df.pivot_table(
+                        index='day_of_week',
+                        columns='hour',
+                        values='velocidade',
+                        aggfunc='mean'
+                    )
 
-                # Reordenar dias da semana (em português)
-                dias_ordenados_eng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
-                dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
+                    # Reordenar dias da semana (em português)
+                    dias_ordenados_eng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                    dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
+                    dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
 
-                # Reindexar a tabela pivotada e renomear índice
-                pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                pivot_table.index = pivot_table.index.map(dia_mapping)
+                    # Reindexar a tabela pivotada e renomear índice
+                    pivot_table = pivot_table.reindex(dias_ordenados_eng)
+                    pivot_table.index = pivot_table.index.map(dia_mapping)
 
-                # --- Código Plotly para Heatmap Interativo com Tooltip ---
-                fig_plotly = px.heatmap(
-                    pivot_table,
-                    text_auto=".1f", # Mostra o valor dentro da célula (opcional, mas similar ao seu annot=True)
-                    aspect="auto",
-                    title="Velocidade Média por Dia da Semana e Hora"
-                )
+                    # --- Código Plotly para Heatmap Interativo com Tooltip ---
+                    fig_plotly = px.heatmap(
+                        pivot_table,
+                        text_auto=".1f", # Mostra o valor dentro da célula (opcional, mas similar ao seu annot=True)
+                        aspect="auto",
+                        title="Velocidade Média por Dia da Semana e Hora"
+                    )
 
-                # O Plotly Express geralmente adiciona tooltips automaticamente mostrando
-                # os valores do eixo X, eixo Y e o valor da cor/célula ao passar o mouse.
-                # Você pode personalizar o hovertext com fig_plotly.update_traces(hovertemplate=...)
-                # se precisar de um formato diferente, mas o padrão já mostra o valor.
+                    # O Plotly Express geralmente adiciona tooltips automaticamente mostrando
+                    # os valores do eixo X, eixo Y e o valor da cor/célula ao passar o mouse.
+                    # Você pode personalizar o hovertext com fig_plotly.update_traces(hovertemplate=...)
+                    # se precisar de um formato diferente, mas o padrão já mostra o valor.
 
 
-                # Exibe o gráfico Plotly no Streamlit
-                st.plotly_chart(fig_plotly, use_container_width=True)
+                    # Exibe o gráfico Plotly no Streamlit
+                    st.plotly_chart(fig_plotly, use_container_width=True)
 
-            else:
-                st.info("Dados insuficientes para gerar o Heatmap.")
+                else:
+                    st.info("Dados insuficientes para gerar o Heatmap.")
 
 
                 st.subheader("🔮 Previsão de Velocidade (Modelo ARIMA)")
