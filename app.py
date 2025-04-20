@@ -652,21 +652,21 @@ def gerar_insights(df):
 
     # Encontrar o dia da semana mais lento em média
     if 'day_of_week' in df.columns and not df['day_of_week'].empty:
-        weekday_avg = df.groupby('day_of_week')['velocidade'].mean()
-        if not weekday_avg.empty:
-            # Mapeamento para português e ordenação
-             dias_pt_map = {
-                'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
-                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Sunday': 'Domingo' # <-- Esta é a linha 660 corrigida
-            }
-            weekday_avg_pt = weekday_avg.rename(index=dias_pt_map)
-            dias_ordenados_pt = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
-            weekday_avg_pt = weekday_avg_pt.reindex(dias_ordenados_pt)
+            weekday_avg = df.groupby('day_of_week')['velocidade'].mean()
+            if not weekday_avg.empty:
+                # Mapeamento para português e ordenação
+                dias_pt_map = {
+                    'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
+                    'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
+                }
+                weekday_avg_pt = weekday_avg.rename(index=dias_pt_map) # <-- Esta é a linha 662 corrigida
+                dias_ordenados_pt = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
+                weekday_avg_pt = weekday_avg_pt.reindex(dias_ordenados_pt)
 
-            dia_da_semana_mais_lento = weekday_avg_pt.idxmin()
-            insights.append(f"🗓️ Dia da semana mais lento (em média): **{dia_da_semana_mais_lento}**")
-        else:
-            insights.append("Não foi possível calcular a velocidade média por dia da semana.")
+                dia_da_semana_mais_lento = weekday_avg_pt.idxmin()
+                insights.append(f"🗓️ Dia da semana mais lento (em média): **{dia_da_semana_mais_lento}**")
+            else:
+                insights.append("Não foi possível calcular a velocidade média por dia da semana.")
     else:
         insights.append("Coluna 'day_of_week' não encontrada ou vazia no DataFrame para insights por dia da semana.")
 
