@@ -1,4 +1,5 @@
 import streamlit as st
+import logging # Importar a biblioteca de logging
 
 # Configuração da página DEVE SER A PRIMEIRA CHAMADA
 st.set_page_config(
@@ -15,14 +16,14 @@ from sqlalchemy import create_engine
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.tsa.seasonal import seasonal_decompose
-import plotly.express as px # Mantido para caso precise em outros lugares (mapa, previsão usa go)
+import plotly.express as px # Mantido para caso precise em outros lugares (mapa usa go, previsão usa go)
 import plotly.graph_objects as go
 from io import BytesIO
 import mysql.connector
 import pytz
 from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
-import datetime # Importar datetime para manipular datas
+import datetime # Importar datetime para manipular dates
 import holidays # Importar a biblioteca holidays para feriados
 
 
@@ -198,8 +199,12 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # password = "@Ndre2025." # Mude isso para sua senha real ou use secrets
 # database = "u335174317_wazeportal"
 
-# faz conexxão com o banco de dados MySQL (cached)
+@st.cache_resource # Usar cache_resource para conexões de DB
 def get_db_connection():
+    """
+    Estabelece e retorna uma conexão com o banco de dados MySQL.
+    A conexão é cacheada pelo Streamlit.
+    """
     try:
         # Configuração de pooling ou outras otimizações podem ser adicionadas aqui
         conn = mysql.connector.connect(
@@ -210,11 +215,23 @@ def get_db_connection():
         )
         return conn
     except Exception as e:
+        logging.exception("Erro ao conectar ao banco de dados:") # Log detalhado
         st.error(f"Erro ao conectar ao banco de dados: {e}")
         st.stop() # Parar a execução se não conseguir conectar
 
-
+@st.cache_data # Usar cache_data para os dados históricos, dependendo dos parâmetros
 def get_data(start_date=None, end_date=None, route_name=None):
+    """
+    Busca dados históricos de velocidade do banco de dados para uma rota e período específicos.
+
+    Args:
+        start_date (str, optional): Data de início no formato YYYY-MM-DD. Defaults to None.
+        end_date (str, optional): Data de fim no formato YYYY-MM-DD. Defaults to None.
+        route_name (str, optional): Nome da rota. Defaults to None.
+
+    Returns:
+        tuple[pd.DataFrame, str | None]: DataFrame com os dados e mensagem de erro (se houver).
+    """
     mydb = None
     mycursor = None
     try:
@@ -259,14 +276,22 @@ def get_data(start_date=None, end_date=None, route_name=None):
 
         return df, None
     except Exception as e:
+        logging.exception(f"Erro ao obter dados para rota {route_name}:") # Log detalhado
         return pd.DataFrame(), str(e) # Retorna DataFrame vazio e erro
     finally:
         if mycursor:
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-# Carregar apenas nomes das rotas (cached)
+@st.cache_data # Usar cache_data para dados estáticos como nomes de rotas
 def get_all_route_names():
+    """
+    Busca todos os nomes de rotas distintos no banco de dados.
+    A lista de nomes é cacheada pelo Streamlit.
+
+    Returns:
+        list[str]: Lista de nomes de rotas.
+    """
     mydb = None
     mycursor = None
     try:
@@ -277,6 +302,7 @@ def get_all_route_names():
         results = mycursor.fetchall()
         return [row[0] for row in results]
     except Exception as e:
+        logging.exception("Erro ao obter nomes das rotas:") # Log detalhado
         st.error(f"Erro ao obter nomes das rotas: {e}")
         return []
     finally:
@@ -284,7 +310,18 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
+@st.cache_data # Usar cache_data para coordenadas de rota
 def get_route_coordinates(route_id):
+    """
+    Busca as coordenadas geográficas (linha) para uma rota específica.
+    As coordenadas são cacheadas pelo Streamlit.
+
+    Args:
+        route_id (int): ID da rota.
+
+    Returns:
+        pd.DataFrame: DataFrame com colunas 'longitude' e 'latitude'.
+    """
     mydb = None
     mycursor = None
     try:
@@ -296,6 +333,7 @@ def get_route_coordinates(route_id):
         df = pd.DataFrame(results, columns=['longitude', 'latitude'])
         return df
     except Exception as e:
+        logging.exception(f"Erro ao obter coordenadas para route_id {route_id}:") # Log detalhado
         st.error(f"Erro ao obter coordenadas: {e}")
         return pd.DataFrame()
     finally:
@@ -305,9 +343,27 @@ def get_route_coordinates(route_id):
 
 # --- Funções de Processamento e Análise ---
 
-# Esta função processa o DataFrame e pode ser chamada após carregar os dados
 def clean_data(df):
+    """
+    Limpa, interpola e adiciona features temporais a um DataFrame de velocidade.
+
+    Args:
+        df (pd.DataFrame): DataFrame bruto com colunas 'data' e 'velocidade'.
+
+    Returns:
+        pd.DataFrame: DataFrame limpo com 'day_of_week' e 'hour' adicionados.
+                      Retorna DataFrame vazio se todas as velocidades forem nulas.
+    """
+    if df.empty:
+        return pd.DataFrame()
+
     df = df.copy()
+
+    # Adicionar validação de dados: verificar se todas as velocidades estão nulas
+    if df['velocidade'].isnull().all():
+        st.warning("Após o carregamento, todas as velocidades estão nulas. Verifique os dados de origem ou o período selecionado.")
+        return pd.DataFrame() # Retorna DataFrame vazio se todos os valores são nulos
+
     # Assume que o DataFrame já está filtrado pela rota e período
     # e que a coluna 'data' já é datetime sem timezone e 'velocidade' é numérica
     df = df.sort_values('data')
@@ -321,14 +377,19 @@ def clean_data(df):
     # Recalcular dia da semana e hora após interpolação/limpeza, se necessário
     # Usar locale para nomes dos dias em português
     # import locale
-    # locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8') # Configurar localidade (pode precisar instalar no ambiente)
+    # locale.setlocale(locale.LC_TIME, 'pt_BR.UTF8') # Configurar localidade (pode precisar instalar no ambiente)
     df['day_of_week'] = df['data'].dt.day_name() # Retorna em inglês por padrão, mapearemos para o heatmap
     df['hour'] = df['data'].dt.hour
     return df.dropna(subset=['velocidade']) # Remove linhas onde a velocidade ainda é NaN
 
 
-# Função de decomposição sazonal (revisada para usar índice de tempo e frequência)
 def seasonal_decomposition_plot(df):
+    """
+    Realiza e plota a decomposição sazonal de uma série temporal de velocidade.
+
+    Args:
+        df (pd.DataFrame): DataFrame com dados limpos e índice de tempo.
+    """
     if df.empty:
         st.info("Não há dados para realizar a decomposição sazonal.")
         return
@@ -346,7 +407,7 @@ def seasonal_decomposition_plot(df):
     df_ts = df_ts.interpolate(method='time')
 
     # O período para sazonalidade diária em dados de 3 em 3 minutos é 480 (24 horas * 60 min / 3 min)
-    period = 480
+    period = 480 # Usando o período padrão
 
     # Precisa de pelo menos 2 ciclos completos de dados para decomposição sazonal
     if len(df_ts.dropna()) < 2 * period:
@@ -378,21 +439,25 @@ def seasonal_decomposition_plot(df):
 
         st.pyplot(fig)
     except Exception as e:
+         logging.exception("Erro ao realizar decomposição sazonal:") # Log detalhado
          st.warning(f"Não foi possível realizar a decomposição sazonal: {e}")
          st.info("Verifique se os dados têm uma frequência regular ou se há dados suficientes.")
 
 
-# Função para criar features exógenas (feriados e vésperas) para um DateTimeIndex
 def create_holiday_exog(index):
-    """Creates 'is_holiday' and 'is_pre_holiday' exog features for a DateTimeIndex."""
+    """
+    Cria features exógenas binárias ('is_holiday' e 'is_pre_holiday') para um DateTimeIndex.
+
+    Args:
+        index (pd.DateTimeIndex): Índice de tempo para o qual gerar as features.
+
+    Returns:
+        pd.DataFrame: DataFrame com as colunas 'is_holiday' e 'is_pre_holiday'.
+    """
     if index.empty:
         return pd.DataFrame(index=index)
 
     # Obter feriados brasileiros para os anos presentes no índice
-    # Inclui feriados estaduais/municipais se suportado pela lib e especificado (BR padrão = nacional)
-    # Para incluir estaduais/municipais, você precisaria da sigla do estado/município
-    # Ex: holidays.CountryHoliday('BR', subdiv='SP', years=...) para São Paulo
-    # Usando apenas BR para feriados nacionais como solicitado implicitamente
     br_holidays = holidays.CountryHoliday('BR', years=index.year.unique())
     exog_df = pd.DataFrame(index=index)
 
@@ -404,8 +469,6 @@ def create_holiday_exog(index):
     # Isso requer que o índice tenha uma frequência regular definida por asfreq.
     if index.freq is None:
          # Fallback para frequência irregular - verifica se o próximo dia CALENDAR (24h) é um feriado
-         # (menos preciso para dados sub-diários irregulares, mas um ponto de partida)
-         # st.warning("ARIMA exog: Frequência temporal não definida. Véspera de feriado calculada por dia calendar.")
          exog_df['is_pre_holiday'] = index.to_series().apply(
              lambda date: (date + pd.Timedelta(days=1)).date() in br_holidays and date.date() not in br_holidays
          ).astype(int)
@@ -425,14 +488,25 @@ def create_holiday_exog(index):
 # Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados E EXOG)
 # Não cacheamos previsões pois elas dependem de dados recentes e podem ser acionadas pelo usuário
 # @st.cache_data # Não use cache_data para previsões se elas devem ser geradas sob demanda
-def create_arima_forecast(df, route_id, steps=10):
+def create_arima_forecast(df, route_id, steps=10, m_period=480):
+    """
+    Cria e executa um modelo de previsão ARIMA sazonal com variáveis exógenas (feriados/vésperas).
+
+    Args:
+        df (pd.DataFrame): DataFrame com dados históricos de velocidade limpos.
+        route_id (int): ID da rota.
+        steps (int, optional): Número de passos futuros para prever. Defaults to 10.
+        m_period (int, optional): Período sazonal para o auto_arima. Defaults to 480 (diário @ 3min).
+
+    Returns:
+        pd.DataFrame: DataFrame com a previsão (datas, yhat, limites de confiança) ou DataFrame vazio em caso de falha.
+    """
     if df.empty:
-        st.info(f"Sem dados para gerar previsão ARIMA para a rota {route_id}.")
+        # Mensagem já exibida na chamada
         return pd.DataFrame()
 
     # Preparar dados para auto_arima (já vem limpo)
     # Garantir frequência temporal, interpolando se houver lacunas curtas
-    # Use dropna(subset=['velocidade']) here too, just in case asfreq introduced NaNs where original df had them
     arima_data_full = df.set_index('data')['velocidade'].asfreq('3min').dropna()
 
     # Criar features exógenas (feriados e vésperas) para o período dos dados históricos
@@ -440,40 +514,35 @@ def create_arima_forecast(df, route_id, steps=10):
 
     # Alinhar dados da série temporal (y) e dados exógenos (X) usando um join interno
     # Isso garante que temos 'y' e 'X' para os mesmos timestamps
-    # Drop NaNs that might result from the inner join if alignment fails
     combined_df = arima_data_full.to_frame(name='y').join(exog_data_full, how='inner').dropna()
     arima_data = combined_df['y']
     exog_data = combined_df[['is_holiday', 'is_pre_holiday']]
 
 
     # Precisa de dados suficientes para o modelo sazonal ARIMA
-    # Uma semana de dados (freq 3min) = 480 pontos/dia * 7 dias = 3360 pontos
-    # Se usarmos variáveis exógenas, o auto_arima precisa de dados suficientes para
-    # estimar os parâmetros sazonais E os parâmetros das exógenas.
-    # Um mínimo de 2-3 ciclos sazonais é recomendado (ex: 2-3 semanas).
-    min_data_points = 3 * 480 # Mínimo ~3 dias de dados com freq de 3min (para detectar sazonalidade diária)
-    # Para sazonalidade semanal (que o auto_arima detectaria com m=480*7), precisaríamos de ~3 semanas.
-    # Vamos manter um requisito mínimo razoável para evitar falhas, mas alertar sobre a necessidade de mais dados para melhor precisão sazonal/exógena.
+    # Um mínimo de 2-3 ciclos sazonais é recomendado
+    min_data_points = 2 * m_period # Mínimo 2 ciclos completos para detectar sazonalidade
 
     if len(arima_data) < min_data_points:
-         st.warning(f"Dados insuficientes ({len(arima_data)} pontos) para treinar um modelo de previsão ARIMA sazonal com exógenas. Necessário mais dados históricos (ex: pelo menos {int(min_data_points)} pontos válidos, idealmente 3 semanas).")
+         st.warning(f"Dados insuficientes ({len(arima_data)} pontos) para treinar um modelo de previsão ARIMA sazonal robusto com período {m_period}. Necessário pelo menos {int(min_data_points)} pontos válidos após alinhamento.")
          return pd.DataFrame()
 
     try:
         # auto_arima encontrará os melhores parâmetros p,d,q,P,D,Q
-        # m=480 para sazonalidade diária em dados de 3 em 3 minutos
-        # m=480*7 = 3360 para sazonalidade semanal (considere adicionar dependendo da quantidade de dados)
-        # Adicionado stepwise=True para acelerar, n_fits para limitar tentativas, random_state para reprodutibilidade
+        # Passando o período sazonal 'm' selecionado pelo usuário
         # PASSANDO DADOS EXÓGENOS (X=exog_data)
-        with st.spinner(f"Treinando modelo ARIMA para a rota {route_id}..."):
-             model = auto_arima(arima_data, X=exog_data, seasonal=True, m=480, # m=480 para sazonalidade diária
+        with st.spinner(f"Treinando modelo ARIMA para a rota {route_id} com período sazonal m={m_period}..."):
+             model = auto_arima(arima_data, X=exog_data, seasonal=True, m=m_period,
                                 error_action='ignore', suppress_warnings=True,
                                 stepwise=True, random_state=42,
                                 n_fits=20) # Limitar o número de fits para evitar tempo excessivo
 
         # Gerar dates futuras com base na última data histórica e frequência
         last_date = arima_data.index.max()
-        future_dates = pd.date_range(start=last_date, periods=steps + 1, freq='3min')[1:]
+        # A frequência deve ser compatível com m=480 ou 3360 (baseado em 3min)
+        freq_str = '3min' # Assumindo 3minutos como base
+
+        future_dates = pd.date_range(start=last_date, periods=steps + 1, freq=freq_str)[1:]
 
         # Criar features exógenas (feriados e vésperas) para o PERÍODO DA PREVISÃO
         future_exog_data = create_holiday_exog(future_dates)
@@ -499,13 +568,19 @@ def create_arima_forecast(df, route_id, steps=10):
 
         return forecast_df
     except Exception as e:
+        logging.exception("Erro durante o treinamento ou previsão do modelo ARIMA:") # Log detalhado
         st.error(f"Erro durante o treinamento ou previsão do modelo ARIMA: {str(e)}")
-        st.info("Verifique os dados de entrada, a quantidade de dados ou os parâmetros do auto_arima.")
+        st.info("Verifique os dados de entrada, a quantidade de dados, ou a configuração do modelo ARIMA.")
         return pd.DataFrame()
 
 
-# Não cachear a função de salvar no DB
 def save_forecast_to_db(forecast_df):
+    """
+    Salva um DataFrame de previsão no banco de dados.
+
+    Args:
+        forecast_df (pd.DataFrame): DataFrame com a previsão a ser salva.
+    """
     if forecast_df.empty:
         st.warning("Não há previsão para salvar no banco de dados.")
         return # Não salva se o DataFrame estiver vazio
@@ -525,7 +600,7 @@ def save_forecast_to_db(forecast_df):
     forecast_df_mapped = forecast_df_mapped[cols_to_save]
 
     try:
-        st.info("Conectando ao banco de dados para salvar previsão...")
+        # st.info("Conectando ao banco de dados para salvar previsão...") # Substituído por toast/log
         # Usando credenciais do secrets
         engine = create_engine(
             f'mysql+mysqlconnector://{st.secrets["mysql"]["user"]}:{st.secrets["mysql"]["password"]}@{st.secrets["mysql"]["host"]}/{st.secrets["mysql"]["database"]}'
@@ -534,17 +609,26 @@ def save_forecast_to_db(forecast_df):
         # if_exists='append' adiciona novas linhas. Se você precisar evitar duplicatas,
         # pode precisar de uma lógica de upsert ou verificar antes de inserir.
         with engine.begin() as connection:
-             st.info("Salvando previsão na tabela forecast_history...")
+             # st.info("Salvando previsão na tabela forecast_history...") # Substituído por toast/log
              # Converte datetime para tipo compatível com SQL, como string ou timestamp
              forecast_df_mapped['data'] = forecast_df_mapped['data'].dt.strftime('%Y-%m-%d %H:%M:%S')
              forecast_df_mapped.to_sql('forecast_history', con=connection, if_exists='append', index=False)
-             st.success("Previsão salva no banco de dados!") # Feedback ao usuário
+             st.toast("Previsão salva no banco de dados!", icon="✅") # Feedback ao usuário com toast
     except Exception as e:
+        logging.exception("Erro ao salvar previsão no banco de dados:") # Log detalhado
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
 
-# Função de geração de insights automáticos
 def gerar_insights(df):
+    """
+    Gera insights automáticos sobre a velocidade média, dia mais lento, etc.
+
+    Args:
+        df (pd.DataFrame): DataFrame com dados históricos de velocidade processados.
+
+    Returns:
+        str: String formatada com os insights.
+    """
     insights = []
     if df.empty:
         return "Não há dados para gerar insights neste período."
@@ -573,7 +657,7 @@ def gerar_insights(df):
             # Mapeamento para português e ordenação
             dias_pt_map = {
                 'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
-                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
+                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Domingo'
             }
             weekday_avg_pt = weekday_avg.rename(index=dias_pt_map)
             dias_ordenados_pt = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
@@ -603,10 +687,15 @@ def gerar_insights(df):
 # --- Função Principal do Aplicativo Streamlit ---
 
 def main():
+    """
+    Função principal que configura a interface do Streamlit, carrega dados
+    e exibe análises e previsões.
+    """
     # Verificar se as secrets do banco de dados estão configuradas
     if "mysql" not in st.secrets or not all(k in st.secrets["mysql"] for k in ("host", "user", "password", "database")):
         st.error("As credenciais do banco de dados não foram configuradas corretamente no secrets.toml.")
         st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` na raiz do seu projeto com as informações de conexão do MySQL.")
+        logging.error("Secrets do banco de dados não configuradas.") # Log detalhado
         st.stop() # Parar a execução
 
 
@@ -628,6 +717,7 @@ def main():
         all_route_names = get_all_route_names()
         if not all_route_names:
              st.warning("Não foi possível carregar os nomes das rotas do banco de dados ou não há rotas disponíveis.")
+             logging.warning("Nenhum nome de rota encontrado no banco de dados.") # Log detalhado
              st.stop() # Parar se não houver rotas
 
         # Usar índice para garantir que o selectbox não quebre se o nome da rota mudar ou não existir
@@ -680,7 +770,7 @@ def main():
 
         st.subheader("Período de Análise")
         # Usar um seletor de data por rota para flexibilidade na comparação de períodos diferentes
-        # Usar session_state para persistir as datas
+        # Usar session_state para persistir as dates
         today = datetime.date.today()
         week_ago = today - datetime.timedelta(days=7)
 
@@ -727,6 +817,30 @@ def main():
              st.error("Data final da rota secundária não pode ser anterior à data inicial.")
              st.stop()
 
+        st.subheader("Configurações ARIMA")
+        # Adicionar seletor para o período sazonal (m)
+        m_period_options = {
+            "Diário (480 pontos @ 3min)": 480,
+            "Semanal (3360 pontos @ 3min)": 3360,
+            "Mensal (~14400 pontos @ 3min)": 14400 # Aproximado
+        }
+        selected_m_key = st.selectbox(
+            "Período sazonal (m) para ARIMA:",
+            list(m_period_options.keys()),
+            index=0, # Padrão diário
+            key="arima_m_select"
+        )
+        arima_m_period = m_period_options[selected_m_key]
+
+        # Adicionar controle para o número de passos da previsão
+        forecast_steps = st.slider(f"Quantos pontos futuros prever ({arima_m_period} / freq 3min)?",
+                                   min_value=1, max_value=4 * arima_m_period, # Permite prever até 4 ciclos
+                                   value=arima_m_period // 2, # Padrão: meio ciclo
+                                   step=int(arima_m_period / 10), # Passo razoável (1/10 do ciclo)
+                                   key="forecast_steps_slider")
+        st.info(f"Previsão cobrirá aproximadamente {forecast_steps * 3} minutos.")
+
+
     st.title("🚀 Análise de Rotas Inteligente")
     st.markdown("Selecione as rotas e o período de análise no painel lateral.")
 
@@ -737,6 +851,8 @@ def main():
 
     # --- Carregamento e Processamento de Dados ---
     st.header("⏳ Processando Dados...")
+    processed_dfs = {} # Dicionário para armazenar os DataFrames processados
+
     for route in routes_to_process:
         date_range = date_range_main if route == route_name else date_range_secondary
         if date_range is None: # Caso a comparação esteja habilitada, mas a rota secundária não tenha range
@@ -756,31 +872,46 @@ def main():
 
             if error:
                  st.error(f"Erro ao carregar dados para {route}: {error}")
+                 logging.error(f"Erro ao carregar dados para {route}: {error}")
                  routes_info[route] = {'data': pd.DataFrame(), 'id': None, 'error': error}
                  continue # Pula para a próxima rota se houver erro
 
             if raw_df.empty:
                 st.warning(f"Nenhum dado encontrado para a rota '{route}' no período de {start_date_str} a {end_date_str}. Por favor, ajuste o intervalo de dates.")
+                logging.warning(f"Nenhum dado encontrado para a rota '{route}' no período {start_date_str} a {end_date_str}.")
                 routes_info[route] = {'data': pd.DataFrame(), 'id': None}
                 continue # Pula para a próxima rota
 
+            # Adicionar indicador de qualidade dos dados (dados ausentes)
+            total_records = len(raw_df)
+            initial_nulls = raw_df['velocidade'].isnull().sum()
+            initial_null_percentage = (initial_nulls / total_records) * 100 if total_records > 0 else 0
+            st.metric(f"Dados Ausentes Inicialmente ({route})", f"{initial_null_percentage:.1f}%")
+
             # Obter o ID da rota (assumindo que há apenas um ID por nome no período selecionado)
-            # Se houver dados, deve haver um route_id
             try:
                  route_id = raw_df['route_id'].iloc[0]
             except IndexError:
-                 st.error(f"Não foi possível obter o ID da rota para '{route}'.")
+                 st.error(f"Não foi possível obter o ID da rota para '{route}'. Dados insuficientes.")
+                 logging.error(f"Não foi possível obter ID da rota para '{route}'. DataFrame vazio ou sem route_id.")
                  routes_info[route] = {'data': pd.DataFrame(), 'id': None}
                  continue
 
             # Limpar e processar os dados
             processed_df = clean_data(raw_df)
 
+            if processed_df.empty:
+                 # Mensagem de warning já exibida dentro de clean_data se todos os valores forem nulos
+                 routes_info[route] = {'data': pd.DataFrame(), 'id': None}
+                 continue
+
+
             routes_info[route] = {
                 'data': processed_df,
                 'id': route_id
             }
-        st.success(f"Dados para {route} carregados e processados ({len(processed_df)} registros).")
+            processed_dfs[route] = processed_df # Armazena para comparação
+        st.toast(f"Dados para {route} carregados e processados ({len(processed_df)} registros).", icon="✅") # Feedback com toast
 
 
     # --- Seção de Visualização ---
@@ -863,7 +994,48 @@ def main():
              st.info(f"Dados insuficientes para exibir o mapa da rota '{route}'.")
 
 
-    # --- Seção de Análise ---
+    st.header("📊 Visualização de Dados Históricos")
+
+    # --- Comparação Visual de Dados Históricos (Gráfico de Linha Plotly) ---
+    if len(processed_dfs) > 0:
+         st.subheader("Comparação de Velocidade Histórica ao Longo do Tempo")
+         fig_historical_comparison = go.Figure()
+
+         colors = [PRIMARY_COLOR, ACCENT_COLOR] # Cores para as rotas
+
+         for i, (r_name, r_df) in enumerate(processed_dfs.items()):
+              if not r_df.empty:
+                   fig_historical_comparison.add_trace(go.Scatter(
+                       x=r_df['data'],
+                       y=r_df['velocidade'],
+                       mode='lines',
+                       name=f'Histórico: {r_name}',
+                       line=dict(color=colors[i % len(colors)], width=2) # Usa cores distintas
+                   ))
+              else:
+                   st.info(f"Dados insuficientes para incluir '{r_name}' no gráfico de comparação histórica.")
+
+
+         if len(fig_historical_comparison.data) > 0: # Exibe apenas se houver pelo menos uma rota
+              fig_historical_comparison.update_layout(
+                  title='Velocidade Histórica ao Longo do Tempo',
+                  xaxis_title="Data/Hora",
+                  yaxis_title="Velocidade (km/h)",
+                  hovermode='x unified',
+                  plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
+                  paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
+                  font=dict(color=TEXT_COLOR),
+                  title_font_color=TEXT_COLOR,
+                  xaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
+                  yaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
+                  legend=dict(font=dict(color=TEXT_COLOR))
+              )
+              st.plotly_chart(fig_historical_comparison, use_container_width=True)
+         elif compare_enabled:
+              st.info("Dados insuficientes para realizar a comparação histórica entre as rotas selecionadas.")
+
+
+    # --- Seção de Análise Preditiva ---
     st.header("📈 Análise Preditiva")
     for route in routes_to_process:
         # Verifica se a rota foi carregada com sucesso e tem dados processados
@@ -911,7 +1083,7 @@ def main():
                     sns.heatmap(
                         pivot_table,
                         annot=True,      # Mostrar os valores nas células
-                        fmt=".0f",       # Formatar os valores para 2 casas decimais
+                        fmt=".0f",       # Formatar os valores para 0 casas decimais (inteiro) <--- Corrigido para 0 casas decimais
                         cmap="viridis",  # Mapa de cores (similar ao Viridis do Plotly)
                         linewidths=.5,   # Adicionar linhas entre as células para clareza
                         ax=ax_mpl        # Desenhar no eixo Matplotlib criado
@@ -946,21 +1118,21 @@ def main():
 
 
                 st.subheader("🔮 Previsão de Velocidade (ARIMA)")
-                # Adicionar controle para o número de passos da previsão
-                forecast_steps = st.slider(f"Quantos pontos futuros prever (rota: {route})?", min_value=1, max_value=48 * (60//3), value=48 * (60//3)//2, step=(60//3), key=f"forecast_steps_{route}") # Prever até 48 horas em passos de 3min
 
-                # Botão para rodar a previsão
+                # Botão para rodar a previsão (usa forecast_steps e arima_m_period definidos na sidebar)
                 if st.button(f"Gerar Previsão para {route}", key=f"generate_forecast_{route}"):
                      forecast_df = pd.DataFrame() # Initialize DataFrame
 
                      # --- Try/Except para a Geração da Previsão ARIMA ---
                      try:
-                         st.info(f"Iniciando geração da previsão ARIMA para {route}...")
-                         # Chamada da função de previsão ARIMA (agora com exógenas)
-                         forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps)
+                         st.info(f"Iniciando geração da previsão ARIMA para {route} com período sazonal m={arima_m_period} e {forecast_steps} passos futuros...")
+                         # Chamada da função de previsão ARIMA (agora com exógenas e m_period)
+                         forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps, m_period=arima_m_period)
 
                          if not forecast_df.empty:
                              st.success(f"Previsão gerada para os próximos {forecast_steps * 3} minutos.")
+                             st.toast("Previsão gerada!", icon="✅") # Feedback com toast
+
 
                              # --- Try/Except para Plotar o Gráfico de Previsão ---
                              try:
@@ -972,7 +1144,7 @@ def main():
                                      x=processed_df['data'],
                                      y=processed_df['velocidade'],
                                      mode='lines',
-                                     name='Histórico',
+                                     name=f'Histórico: {route}', # Nome da rota no histórico
                                      line=dict(color=TEXT_COLOR, width=2) # Cor para o histórico
                                  ))
 
@@ -981,7 +1153,7 @@ def main():
                                      x=forecast_df['ds'],
                                      y=forecast_df['yhat'],
                                      mode='lines',
-                                     name='Previsão',
+                                     name=f'Previsão: {route}', # Nome da rota na previsão
                                      line=dict(color=PRIMARY_COLOR, width=3) # Cor primária para a previsão
                                  ))
 
@@ -992,7 +1164,7 @@ def main():
                                      fill='toself', # Preenche a área entre as duas linhas
                                      fillcolor='rgba(0, 175, 255, 0.2)', # Cor semi-transparente (similar ao PRIMARY_COLOR)
                                      line=dict(color='rgba(255,255,255,0)'), # Linha invisível
-                                     name='Intervalo de Confiança 95%'
+                                     name=f'Intervalo de Confiança 95% ({route})'
                                  ))
 
                                  # Configura o layout do gráfico de previsão
@@ -1013,26 +1185,33 @@ def main():
                                  st.plotly_chart(fig_forecast, use_container_width=True)
                                  st.success("Gráfico de previsão gerado.")
 
-                                 # --- Try/Except para Salvar no Banco de Dados ---
-                                 # O botão de salvar ainda aparecerá, e a função save_forecast_to_db tem seu próprio try/except
-                                 st.info("Clique em 'Salvar Previsão...' para salvar a previsão no banco de dados.")
-
 
                              except Exception as e:
+                                 logging.exception("Erro ao gerar ou exibir o gráfico de previsão:") # Log detalhado
                                  st.error(f"Erro ao gerar ou exibir o gráfico de previsão: {e}")
                                  st.info("Verifique se há dados suficientes na previsão gerada ou se há problemas na configuração do gráfico Plotly.")
 
+                             # --- Try/Except para Salvar no Banco de Dados ---
+                             # O botão de salvar só aparece APÓS a previsão ser gerada e plotada
+                             if st.button(f"Salvar Previsão no Banco de Dados para {route}", key=f"save_forecast_{route}"):
+                                  save_forecast_to_db(forecast_df)
+
+
                          else:
                              st.warning("Previsão não gerada ou DataFrame de previsão vazio. Não é possível exibir o gráfico ou salvar.")
+                             st.toast("Previsão falhou!", icon="❌") # Feedback com toast
 
                      except Exception as e:
+                         logging.exception("Erro fatal durante a geração da previsão ARIMA:") # Log detalhado
                          st.error(f"Erro fatal durante a geração da previsão ARIMA: {e}")
                          st.info("Verifique os dados de entrada, a quantidade de dados, ou a configuração do modelo ARIMA.")
+                         st.toast("Previsão falhou!", icon="❌") # Feedback com toast
 
 
+                # Mensagem inicial antes de gerar a previsão
                 elif f"generate_forecast_{route}" not in st.session_state:
-                    # Mensagem inicial antes de gerar a previsão
-                    st.info("Clique no botão acima para gerar a previsão de velocidade para esta rota.")
+                    st.info("Configure o período sazonal e os passos futuros na sidebar e clique em 'Gerar Previsão'.")
+
 
         # Adiciona uma linha separadora entre as análises de rotas se houver mais de uma
         if len(routes_to_process) > 1 and routes_to_process.index(route) < len(routes_to_process) - 1:
