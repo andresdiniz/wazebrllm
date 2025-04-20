@@ -747,7 +747,6 @@ def main():
                 # Passa o df processado que clean_data retornou
                 seasonal_decomposition_plot(processed_df)
 
-                st.subheader("🔥 Heatmap Horário por Dia da Semana")
                 with st.expander(f"Análise para {route}", expanded=True):
 
                 st.subheader("🧠 Insights Automáticos")
