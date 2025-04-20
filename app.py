@@ -11,10 +11,11 @@ st.set_page_config(
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
+# Importar matplotlib e seaborn para o heatmap e decomposição
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.tsa.seasonal import seasonal_decompose
-import plotly.express as px # Mantido para caso precise em outros lugares, mas heatmap usará go
+import plotly.express as px # Mantido para caso precise em outros lugares (mapa, previsão usa go)
 import plotly.graph_objects as go
 from io import BytesIO
 import mysql.connector
@@ -97,7 +98,7 @@ h1, h2, h3, h4, h5, h6 {{
 .stButton>button {{
     background-color: var(--primary-color);
     color: white;
-    border-radius: 8px;
+    border-radius: 8后mpx;
     border: none; /* Remover borda padrão */
     padding: 10px 20px; /* Padding para melhor aparência */
     cursor: pointer;
@@ -229,58 +230,6 @@ def get_all_route_names():
     except Exception as e:
         st.error(f"Erro ao obter nomes das rotas: {e}")
         return []
-    finally:
-        if mycursor:
-            mycursor.close()
-        # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
-
-@st.cache_data # Usar cache_data para os dados históricos, dependendo dos parâmetros
-def get_data(start_date=None, end_date=None, route_name=None):
-    mydb = None
-    mycursor = None
-    try:
-        mydb = get_db_connection()
-        mycursor = mydb.cursor()
-
-        query = """
-            SELECT hr.route_id, r.name AS route_name, hr.data, hr.velocidade
-            FROM historic_routes hr
-            JOIN routes r ON hr.route_id = r.id
-        """
-        conditions = []
-        params = []
-
-        if route_name:
-            conditions.append("r.name = %s")
-            params.append(route_name)
-        if start_date:
-            conditions.append("hr.data >= %s")
-            params.append(start_date)
-        if end_date:
-             # Para incluir o último dia completo, filtrar por < (data final + 1 dia)
-            end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
-            end_date_plus_one_day_str = end_datetime.strftime('%Y-%m-%d')
-
-            conditions.append("hr.data < %s") # Usar o operador MENOR QUE (<)
-            params.append(end_date_plus_one_day_str) # Usar a data final + 1 dia
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += " ORDER BY hr.data ASC"
-
-        mycursor.execute(query, params)
-        results = mycursor.fetchall()
-        col_names = [desc[0] for desc in mycursor.description]
-        df = pd.DataFrame(results, columns=col_names)
-
-        # Convertendo 'data' para datetime e 'velocidade' para numérico
-        df['data'] = pd.to_datetime(df['data']).dt.tz_localize(None) # Remover timezone se presente
-        df['velocidade'] = pd.to_numeric(df['velocidade'], errors='coerce')
-
-        return df, None
-    except Exception as e:
-        return pd.DataFrame(), str(e) # Retorna DataFrame vazio e erro
     finally:
         if mycursor:
             mycursor.close()
@@ -474,13 +423,13 @@ def create_arima_forecast(df, route_id, steps=10):
                                 stepwise=True, random_state=42,
                                 n_fits=20) # Limitar o número de fits para evitar tempo excessivo
 
-        # Gerar datas futuras com base na última data histórica e frequência
+        # Gerar dates futuras com base na última data histórica e frequência
         last_date = arima_data.index.max()
         future_dates = pd.date_range(start=last_date, periods=steps + 1, freq='3min')[1:]
 
         # Criar features exógenas (feriados e vésperas) para o PERÍODO DA PREVISÃO
         future_exog_data = create_holiday_exog(future_dates)
-        # Garantir que o índice dos dados exógenos futuros corresponda exatamente às datas futuras
+        # Garantir que o índice dos dados exógenos futuros corresponda exatamente às dates futuras
         future_exog_data = future_exog_data.reindex(future_dates)
 
 
@@ -722,7 +671,7 @@ def main():
                  date_range_secondary = st.session_state[f"date_range_{second_route}"] # Use o valor persistido
 
 
-        # Validar as datas
+        # Validar as dates
         if date_range_main and date_range_main[0] > date_range_main[1]:
             st.error("Data final da rota principal não pode ser anterior à data inicial")
             st.stop()
@@ -763,7 +712,7 @@ def main():
                  continue # Pula para a próxima rota se houver erro
 
             if raw_df.empty:
-                st.warning(f"Nenhum dado encontrado para a rota '{route}' no período de {start_date_str} a {end_date_str}. Por favor, ajuste o intervalo de datas.")
+                st.warning(f"Nenhum dado encontrado para a rota '{route}' no período de {start_date_str} a {end_date_str}. Por favor, ajuste o intervalo de dates.")
                 routes_info[route] = {'data': pd.DataFrame(), 'id': None}
                 continue # Pula para a próxima rota
 
@@ -902,65 +851,47 @@ def main():
 
                     # Reindexar a tabela pivotada para garantir a ordem dos dias
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
+                    # Renomear o índice para português
+                    pivot_table.index = pivot_table.index.map(dia_mapping)
 
-                    # --- Usar go.Heatmap ---
-                    # Resetar o índice para transformar a coluna 'day_of_week' em uma coluna
-                    pivot_table_reset = pivot_table.reset_index()
-                    # Renomear a coluna que era o índice ('day_of_week') para 'Dia da Semana'
-                    pivot_table_reset = pivot_table_reset.rename(columns={'day_of_week': 'Dia da Semana'})
 
-                    # Aplicar o mapeamento dos nomes dos dias para português AGORA que 'Dia da Semana' é uma coluna
-                    pivot_table_reset['Dia da Semana'] = pivot_table_reset['Dia da Semana'].map(dia_mapping)
+                    # --- Usar Matplotlib/Seaborn Heatmap ---
+                    # Criar uma figura e eixos Matplotlib
+                    fig_mpl, ax_mpl = plt.subplots(figsize=(12, 8)) # Tamanho da figura
 
-                    # Define uma categoria para a coluna 'Dia da Semana' para garantir a ordem correta no gráfico
-                    pivot_table_reset['Dia da Semana'] = pd.Categorical(
-                        pivot_table_reset['Dia da Semana'], categories=dias_pt, ordered=True
-                    )
-                    # Ordenar pelo dia da semana categórico
-                    pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
-
-                    # Prepare data for go.Heatmap - it expects arrays/lists directly
-                    # Usar os nomes das colunas do pivot_table para garantir que pegamos as horas corretas
-                    x_data = list(pivot_table.columns) # Original columns são as horas (inteiros)
-                    y_data = pivot_table_reset['Dia da Semana'].tolist() # Lista ordenada dos nomes dos dias
-                    # Z data: Os valores do corpo da tabela pivotada
-                    z_data = pivot_table_reset[x_data].values # Pega o array numpy dos valores
-
-                    # Create the figure using go.Heatmap
-                    # --- CONFIGURAÇÃO COMPLETA DO COLORBAR RESTAURADA ---
-                    colorbar_config = dict(
-                        title="Velocidade Média (km/h)",
-                        titleside="right",
-                        titlefont=dict(color=TEXT_COLOR),
-                        tickfont=dict(color=TEXT_COLOR)
-                    )
-                    # --- Remover linha de debug do colorbar ---
-                    # st.write("DEBUG: Configuração de colorbar sendo passada:", colorbar_config)
-
-                    # Trecho modificado do Heatmap
-                    fig_heatmap = go.Figure(go.Heatmap(
-                        x=x_data,  # Horas
-                        y=y_data,  # Dias da Semana
-                        z=z_data,  # Valores de velocidade
-                        colorscale="Viridis",
-                        hoverinfo="x+y+z",
-                        texttemplate="%{z:.0f}"
-                    ))
-
-                    # Configurar layout para combinar com o tema (cores, fontes)
-                    fig_heatmap.update_layout(
-                        title="Velocidade Média por Dia da Semana e Hora",
-                        title_font_color=TEXT_COLOR,
-                        xaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Hora do Dia", title_font_color=TEXT_COLOR, type='category'), # Usa tipo categoria para horas discretas
-                        yaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Dia da Semana", title_font_color=TEXT_COLOR, type='category'), # Usa tipo categoria para dias ordenados
-                        plot_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do plot
-                        paper_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do papel (figura)
-                        font=dict(color=TEXT_COLOR), # Cor da fonte global do gráfico
-                         # margin={"r":0,"t":0,"l":0,"b":0}, # Margem opcional
+                    # Gerar o heatmap usando Seaborn
+                    sns.heatmap(
+                        pivot_table,
+                        annot=True,      # Mostrar os valores nas células
+                        fmt=".2f",       # Formatar os valores para 2 casas decimais
+                        cmap="viridis",  # Mapa de cores (similar ao Viridis do Plotly)
+                        linewidths=.5,   # Adicionar linhas entre as células para clareza
+                        ax=ax_mpl        # Desenhar no eixo Matplotlib criado
+                         # annot_kws={"color": TEXT_COLOR} # Opcional: cor da fonte da anotação (pode prejudicar leitura)
                     )
 
-                    # Exibe o gráfico Plotly no Streamlit
-                    st.plotly_chart(fig_heatmap, use_container_width=True)
+                    # Configurar títulos e labels dos eixos para o tema escuro
+                    ax_mpl.set_title('Velocidade Média por Dia da Semana e Hora', color=TEXT_COLOR)
+                    ax_mpl.set_xlabel('Hora do Dia', color=TEXT_COLOR)
+                    ax_mpl.set_ylabel('Dia da Semana', color=TEXT_COLOR)
+
+                    # Configurar cor dos ticks dos eixos e fundo do plot
+                    ax_mpl.tick_params(axis='x', colors=TEXT_COLOR)
+                    ax_mpl.tick_params(axis='y', colors=TEXT_COLOR)
+                    ax_mpl.set_facecolor(SECONDARY_BACKGROUND_COLOR) # Fundo da área do plot
+
+                    # Configurar cor de fundo da figura inteira
+                    fig_mpl.patch.set_facecolor(SECONDARY_BACKGROUND_COLOR) # Fundo da figura
+
+                    # Configurar a cor da barra de cor (colorbar)
+                    cbar = ax_mpl.collections[0].colorbar # Obter o objeto colorbar
+                    if cbar:
+                         cbar.ax.tick_params(colors=TEXT_COLOR) # Cor dos ticks
+                         cbar.set_label('Velocidade Média (km/h)', color=TEXT_COLOR) # Cor do label
+
+                    # Exibir a figura Matplotlib no Streamlit
+                    st.pyplot(fig_mpl)
+                    plt.close(fig_mpl) # Fechar a figura para liberar memória
 
                 else:
                     st.info("Dados insuficientes para gerar o Heatmap.")
@@ -1008,7 +939,7 @@ def main():
 
                                  # Adiciona o intervalo de confiança
                                  fig_forecast.add_trace(go.Scatter(
-                                     x=pd.concat([forecast_df['ds'], forecast_df['ds'][::-1]]), # Datas para o polígono (ida e volta)
+                                     x=pd.concat([forecast_df['ds'], forecast_df['ds'][::-1]]), # Dates para o polígono (ida e volta)
                                      y=pd.concat([forecast_df['yhat_upper'], forecast_df['yhat_lower'][::-1]]), # Limites (superior e inferior invertido)
                                      fill='toself', # Preenche a área entre as duas linhas
                                      fillcolor='rgba(0, 175, 255, 0.2)', # Cor semi-transparente (similar ao PRIMARY_COLOR)
