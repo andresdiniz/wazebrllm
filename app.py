@@ -199,7 +199,6 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # database = "u335174317_wazeportal"
 
 # faz conexxão com o banco de dados MySQL (cached)
-@st.cache_resource # Usar cache_resource para conexões de DB
 def get_db_connection():
     try:
         # Configuração de pooling ou outras otimizações podem ser adicionadas aqui
@@ -215,7 +214,6 @@ def get_db_connection():
         st.stop() # Parar a execução se não conseguir conectar
 
 
-@st.cache_data # Usar cache_data para os dados históricos, dependendo dos parâmetros
 def get_data(start_date=None, end_date=None, route_name=None):
     mydb = None
     mycursor = None
@@ -268,7 +266,6 @@ def get_data(start_date=None, end_date=None, route_name=None):
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
 # Carregar apenas nomes das rotas (cached)
-@st.cache_data # Usar cache_data para dados estáticos como nomes de rotas
 def get_all_route_names():
     mydb = None
     mycursor = None
@@ -287,7 +284,6 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-@st.cache_data # Usar cache_data para coordenadas de rota
 def get_route_coordinates(route_id):
     mydb = None
     mycursor = None
