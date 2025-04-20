@@ -824,29 +824,45 @@ def main():
                     dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
                     dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
 
-                    # Reindexar a tabela pivotada para garantir a ordem dos dias
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                    # Renomear índice para português (isso será uma coluna no melted df)
-                    pivot_table.index = pivot_table.index.map(dia_mapping)
+                    # O mapeamento do índice para português será feito DEPOIS de resetar o índice
 
-                    # --- NOVO: Converter a tabela pivotada para o formato "long" para Plotly ---
-                    # Resetar o índice para transformar os dias em uma coluna
+                    # --- CORREÇÃO AQUI ---
+                    # Resetar o índice para transformar a coluna 'day_of_week' (o índice original) em uma coluna
                     pivot_table_reset = pivot_table.reset_index()
-                    pivot_table_reset = pivot_table_reset.rename(columns={'index': 'Dia da Semana'}) # Nomeia a nova coluna de índice
+                    # Renomear a coluna que era o índice ('day_of_week') para 'Dia da Semana'
+                    pivot_table_reset = pivot_table_reset.rename(columns={'day_of_week': 'Dia da Semana'})
 
+                    # Aplicar o mapeamento dos nomes dos dias para português AGORA que 'Dia da Semana' é uma coluna
+                    pivot_table_reset['Dia da Semana'] = pivot_table_reset['Dia da Semana'].map(dia_mapping)
+                    # Opcional: Reordenar as linhas pelo novo nome da coluna 'Dia da Semana' se o mapeamento bagunçar a ordem
+                    # Define uma categoria para a coluna 'Dia da Semana' para garantir a ordem correta no gráfico
+                    pivot_table_reset['Dia da Semana'] = pd.Categorical(
+                        pivot_table_reset['Dia da Semana'], categories=dias_pt, ordered=True
+                    )
+                    pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
+
+
+                    # Obter a lista de colunas de hora (todas as colunas exceto 'Dia da Semana')
+                    # Estes são os nomes das colunas numéricas 0, 1, 2, ...
                     hour_columns = [col for col in pivot_table_reset.columns if col != 'Dia da Semana']
+
+                    # --- DIAGNÓSTICO (Descomente se o erro persistir) ---
+                    # st.write("DEBUG: Colunas de pivot_table_reset:", pivot_table_reset.columns.tolist())
+                    # st.write("DEBUG: id_vars passado para melt:", ['Dia da Semana'])
+                    # st.write("DEBUG: value_vars (hour_columns) passado para melt:", hour_columns)
+                    # --- FIM DIAGNÓSTICO ---
 
 
                     # Derreter o DataFrame, especificando explicitamente as colunas de valor (as horas)
                     melted_heatmap_data = pivot_table_reset.melt(
                         id_vars=['Dia da Semana'],        # Coluna(s) para manter como identificadores
-                        value_vars=hour_columns,         # <-- ESPECIFICAR AS COLUNAS DE HORA AQUI
+                        value_vars=hour_columns,         # ESPECIFICAR AS COLUNAS DE HORA
                         var_name='Hora do Dia',          # Nome para a nova coluna de variáveis
                         value_name='Velocidade Média'    # Nome para a nova coluna de valores
                     )
 
                     # Garantir que a coluna de hora seja numérica (Plotly gosta disso para eixos numéricos)
-                    # Alguns podem ser np.int64, outros int; converter para tipo genérico
                     melted_heatmap_data['Hora do Dia'] = pd.to_numeric(melted_heatmap_data['Hora do Dia'])
 
                     # Opcional: Ordenar os dados derretidos para garantir a ordem no gráfico, embora Plotly geralmente gerencie isso
