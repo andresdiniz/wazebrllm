@@ -13,3 +13,4 @@ scikit-learn==1.2.2
 joblib>=1.0.0
 pmdarima==2.0.4
 kaleido==0.2.1
+holidays

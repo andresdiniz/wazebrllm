@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.tsa.seasonal import seasonal_decompose
-import plotly.express as px
+import plotly.express as px # Mantido para caso precise em outros lugares, mas heatmap usará go
 import plotly.graph_objects as go
 from io import BytesIO
 import mysql.connector
@@ -22,7 +22,7 @@ import pytz
 from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
 import datetime # Importar datetime para manipular datas
-import plotly # Importar o módulo plotly completo para verificar a versão
+import holidays # Importar a biblioteca holidays para feriados
 
 
 # Configurações de compatibilidade do numpy (manter se for necessário no seu ambiente)
@@ -385,42 +385,104 @@ def seasonal_decomposition_plot(df):
          st.info("Verifique se os dados têm uma frequência regular ou se há dados suficientes.")
 
 
-# Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados)
+# Função para criar features exógenas (feriados e vésperas) para um DateTimeIndex
+def create_holiday_exog(index):
+    """Creates 'is_holiday' and 'is_pre_holiday' exog features for a DateTimeIndex."""
+    if index.empty:
+        return pd.DataFrame(index=index)
+
+    # Obter feriados brasileiros para os anos presentes no índice
+    br_holidays = holidays.CountryHoliday('BR', years=index.year.unique())
+    exog_df = pd.DataFrame(index=index)
+
+    # is_holiday: Verifica se a data do timestamp atual é um feriado
+    exog_df['is_holiday'] = index.to_series().apply(lambda date: date.date() in br_holidays).astype(int)
+
+    # is_pre_holiday: Verifica se a data EXATAMENTE 24 horas a partir do timestamp atual é um feriado,
+    # E a data atual NÃO é um feriado.
+    # Isso requer que o índice tenha uma frequência regular definida por asfreq.
+    if index.freq is None:
+         # Fallback para frequência irregular - verifica se o próximo dia CALENDAR (24h) é um feriado
+         # (menos preciso para dados sub-diários irregulares, mas um ponto de partida)
+         # st.warning("ARIMA exog: Frequência temporal não definida. Véspera de feriado calculada por dia calendar.")
+         exog_df['is_pre_holiday'] = index.to_series().apply(
+             lambda date: (date + pd.Timedelta(days=1)).date() in br_holidays and date.date() not in br_holidays
+         ).astype(int)
+    else:
+        # Usa a frequência para calcular um offset exato de 24 horas
+        one_day_offset = pd.Timedelta(days=1)
+        # Cria uma série de datas exatamente 24 horas no futuro com base na frequência do índice
+        dates_in_24h = index + one_day_offset
+        # Verifica se a data 24 horas depois é um feriado
+        is_next_day_holiday = dates_in_24h.to_series().apply(lambda date: date.date() in br_holidays).astype(int)
+        # Uma data é véspera de feriado se a data 24h depois é feriado E a data atual NÃO é feriado
+        exog_df['is_pre_holiday'] = is_next_day_holiday & (exog_df['is_holiday'] == 0)
+
+    return exog_df
+
+
+# Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados E EXOG)
 # Não cacheamos previsões pois elas dependem de dados recentes e podem ser acionadas pelo usuário
 # @st.cache_data # Não use cache_data para previsões se elas devem ser geradas sob demanda
 def create_arima_forecast(df, route_id, steps=10):
     if df.empty:
+        st.info(f"Sem dados para gerar previsão ARIMA para a rota {route_id}.")
         return pd.DataFrame()
 
     # Preparar dados para auto_arima (já vem limpo)
     # Garantir frequência temporal, interpolando se houver lacunas curtas
-    arima_data = df.set_index('data')['velocidade'].asfreq('3min').dropna()
+    # Use dropna(subset=['velocidade']) aqui para remover NaNs após asfreq se houver
+    arima_data_full = df.set_index('data')['velocidade'].asfreq('3min').dropna()
+
+    # Criar features exógenas (feriados e vésperas) para o período dos dados históricos
+    exog_data_full = create_holiday_exog(arima_data_full.index)
+
+    # Alinhar dados da série temporal (y) e dados exógenos (X) usando um join interno
+    # Isso garante que temos 'y' e 'X' para os mesmos timestamps
+    combined_df = pd.DataFrame({'y': arima_data_full}).join(exog_data_full, how='inner').dropna()
+    arima_data = combined_df['y']
+    exog_data = combined_df[['is_holiday', 'is_pre_holiday']]
+
 
     # Precisa de dados suficientes para o modelo sazonal ARIMA
-    # Uma semana de dados (3min freq) = 480 pontos/dia * 7 dias = 3360 pontos
-    min_data_points = 24 * 7 * (60/3) # Mínimo ~1 semana de dados com freq de 3min
+    # Uma semana de dados (freq 3min) = 480 pontos/dia * 7 dias = 3360 pontos
+    # Se usarmos variáveis exógenas, o auto_arima precisa de dados suficientes para
+    # estimar os parâmetros sazonais E os parâmetros das exógenas.
+    # Um mínimo de 2-3 ciclos sazonais é recomendado (ex: 2-3 semanas).
+    min_data_points = 3 * 24 * (60/3) # Mínimo ~3 dias de dados com freq de 3min (para detectar sazonalidade diária)
+    # Para sazonalidade semanal (que o auto_arima detectaria com m=480*7), precisaríamos de ~3 semanas.
+    # Vamos manter um requisito mínimo razoável para evitar falhas, mas alertar sobre a necessidade de mais dados para melhor precisão sazonal/exógena.
+
     if len(arima_data) < min_data_points:
-         st.warning(f"Dados insuficientes ({len(arima_data)} pontos) para um modelo de previsão ARIMA sazonal robusto. Necessário mais dados históricos (ex: pelo menos 1 semana com frequência de 3min, aproximadamente {int(min_data_points)} pontos).")
+         st.warning(f"Dados insuficientes ({len(arima_data)} pontos) para treinar um modelo de previsão ARIMA sazonal com exógenas. Necessário mais dados históricos (ex: pelo menos {int(min_data_points)} pontos válidos, idealmente 3 semanas).")
          return pd.DataFrame()
 
     try:
         # auto_arima encontrará os melhores parâmetros p,d,q,P,D,Q
         # m=480 para sazonalidade diária em dados de 3 em 3 minutos
+        # m=480*7 = 3360 para sazonalidade semanal (considere adicionar dependendo da quantidade de dados)
         # Adicionado stepwise=True para acelerar, n_fits para limitar tentativas, random_state para reprodutibilidade
+        # PASSANDO DADOS EXÓGENOS (X=exog_data)
         with st.spinner(f"Treinando modelo ARIMA para a rota {route_id}..."):
-             model = auto_arima(arima_data, seasonal=True, m=480,
+             model = auto_arima(arima_data, X=exog_data, seasonal=True, m=480, # m=480 para sazonalidade diária
                                 error_action='ignore', suppress_warnings=True,
                                 stepwise=True, random_state=42,
                                 n_fits=20) # Limitar o número de fits para evitar tempo excessivo
 
-        # Realizar a previsão com intervalos de confiança
-        forecast, conf_int = model.predict(n_periods=steps, return_conf_int=True)
-
+        # Gerar datas futuras com base na última data histórica e frequência
         last_date = arima_data.index.max()
-        # Gerar datas futuras com base na última data e frequência de 3 minutos
-        # O start deve ser a última data observada, e periods = steps + 1 para incluir a primeira data da previsão
-        # que vem APÓS a última data observada. Depois pegamos a partir do índice 1.
         future_dates = pd.date_range(start=last_date, periods=steps + 1, freq='3min')[1:]
+
+        # Criar features exógenas (feriados e vésperas) para o PERÍODO DA PREVISÃO
+        future_exog_data = create_holiday_exog(future_dates)
+        # Garantir que o índice dos dados exógenos futuros corresponda exatamente às datas futuras
+        future_exog_data = future_exog_data.reindex(future_dates)
+
+
+        # Realizar a previsão com intervalos de confiança
+        # PASSANDO DADOS EXÓGENOS FUTUROS (X=future_exog_data)
+        forecast, conf_int = model.predict(n_periods=steps, return_conf_int=True, X=future_exog_data)
+
 
         forecast_df = pd.DataFrame({
             'ds': future_dates,
@@ -435,9 +497,10 @@ def create_arima_forecast(df, route_id, steps=10):
 
         return forecast_df
     except Exception as e:
-        st.error(f"Erro ao gerar modelo de previsão ou prever: {str(e)}")
-        st.info("Tente selecionar um período de dados maior ou mais estável para a previsão.")
+        st.error(f"Erro ao gerar modelo de previsão ARIMA com exógenas: {str(e)}")
+        st.info("Verifique se há dados suficientes (pelo menos alguns dias) e se as variáveis exógenas foram geradas corretamente.")
         return pd.DataFrame()
+
 
 # Não cachear a função de salvar no DB
 def save_forecast_to_db(forecast_df):
@@ -468,10 +531,13 @@ def save_forecast_to_db(forecast_df):
         # if_exists='append' adiciona novas linhas. Se você precisar evitar duplicatas,
         # pode precisar de uma lógica de upsert ou verificar antes de inserir.
         with engine.begin() as connection:
+             # Converte datetime para tipo compatível com SQL, como string ou timestamp
+             forecast_df_mapped['data'] = forecast_df_mapped['data'].dt.strftime('%Y-%m-%d %H:%M:%S')
              forecast_df_mapped.to_sql('forecast_history', con=connection, if_exists='append', index=False)
              st.success("Previsão salva no banco de dados!") # Feedback ao usuário
     except Exception as e:
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
+
 
 # Função de geração de insights automáticos
 def gerar_insights(df):
@@ -539,12 +605,12 @@ def main():
         st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` na raiz do seu projeto com as informações de conexão do MySQL.")
         st.stop() # Parar a execução
 
-    # --- DIAGNÓSTICO: Verificar a versão do Plotly ---
-    try:
-        st.write(f"DEBUG: Plotly version: {plotly.__version__}")
-    except Exception as e:
-        st.error(f"DEBUG: Não foi possível verificar a versão do Plotly: {e}")
-    # --- FIM DIAGNÓSTICO ---
+    # --- Remover diagnóstico de versão do Plotly ---
+    # try:
+    #     st.write(f"DEBUG: Plotly version: {plotly.__version__}")
+    # except Exception as e:
+    #     st.error(f"DEBUG: Não foi possível verificar a versão do Plotly: {e}")
+    # --- Fim remoção diagnóstico ---
 
 
     with st.sidebar:
@@ -836,103 +902,74 @@ def main():
 
                     # Reindexar a tabela pivotada para garantir a ordem dos dias
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                    # O mapeamento do índice para português será feito DEPOIS de resetar o índice
 
-
-                    # --- CORREÇÃO DO KEYERROR APLICADA AQUI ---
-                    # Resetar o índice para transformar a coluna 'day_of_week' (o índice original) em uma coluna
+                    # --- Usar go.Heatmap ---
+                    # Resetar o índice para transformar a coluna 'day_of_week' em uma coluna
                     pivot_table_reset = pivot_table.reset_index()
                     # Renomear a coluna que era o índice ('day_of_week') para 'Dia da Semana'
-                    # ESTA LINHA FOI CORRIGIDA DE {'index': 'Dia da Semana'} PARA {'day_of_week': 'Dia da Semana'}
                     pivot_table_reset = pivot_table_reset.rename(columns={'day_of_week': 'Dia da Semana'})
 
                     # Aplicar o mapeamento dos nomes dos dias para português AGORA que 'Dia da Semana' é uma coluna
                     pivot_table_reset['Dia da Semana'] = pivot_table_reset['Dia da Semana'].map(dia_mapping)
 
                     # Define uma categoria para a coluna 'Dia da Semana' para garantir a ordem correta no gráfico
-                    # Isso também ajuda Plotly a entender a ordem do eixo Y
                     pivot_table_reset['Dia da Semana'] = pd.Categorical(
                         pivot_table_reset['Dia da Semana'], categories=dias_pt, ordered=True
                     )
-                    # Opcional: Reordenar o dataframe pelo dia da semana categórico (útil para depuração, mas o Plotly geralmente respeita a ordem categórica)
-                    # Removido a reordenação explícita aqui para simplificar, a categoria já deve bastar.
-                    # pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
+                    # Ordenar pelo dia da semana categórico
+                    pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
+
+                    # Prepare data for go.Heatmap - it expects arrays/lists directly
+                    # Usar os nomes das colunas do pivot_table para garantir que pegamos as horas corretas
+                    x_data = list(pivot_table.columns) # Original columns são as horas (inteiros)
+                    y_data = pivot_table_reset['Dia da Semana'].tolist() # Lista ordenada dos nomes dos dias
+                    # Z data: Os valores do corpo da tabela pivotada
+                    z_data = pivot_table_reset[x_data].values # Pega o array numpy dos valores
 
 
-                    # Obter a lista de colunas de hora (todas as colunas exceto 'Dia da Semana')
-                    # Estes são os nomes das colunas numéricas 0, 1, 2, ...
-                    hour_columns = [col for col in pivot_table_reset.columns if col != 'Dia da Semana']
-
-                    # --- DIAGNÓSTICO FINAL ANTES DO MELT (Opcional) ---
-                    # st.write("DEBUG (Before Melt): pivot_table_reset columns:", pivot_table_reset.columns.tolist())
-                    # st.write("DEBUG (Before Melt): pivot_table_reset dtypes:", pivot_table_reset.dtypes)
-                    # st.write("DEBUG (Before Melt): pivot_table_reset head():", pivot_table_reset.head())
-                    # st.write("DEBUG (Before Melt): id_vars for melt:", ['Dia da Semana'])
-                    # st.write("DEBUG (Before Melt): value_vars (hour_columns) for melt:", hour_columns)
-                    # --- FIM DIAGNÓSTICO ---
-
-
-                    # Derreter o DataFrame, especificando explicitamente as colunas de valor (as horas)
-                    # ESTA LINHA FOI CORRIGIDA PARA USAR value_vars=hour_columns
-                    melted_heatmap_data = pivot_table_reset.melt(
-                        id_vars=['Dia da Semana'],        # Coluna(s) para manter como identificadores
-                        value_vars=hour_columns,         # ESPECIFICAR AS COLUNAS DE HORA
-                        var_name='Hora do Dia',          # Nome para a nova coluna de variáveis
-                        value_name='Velocidade Média'    # Nome para a nova coluna de valores
-                    )
-
-                    # Garantir que a coluna de hora seja numérica (Plotly gosta disso para eixos numéricos)
-                    melted_heatmap_data['Hora do Dia'] = pd.to_numeric(melted_heatmap_data['Hora do Dia'])
-
-                    # --- DIAGNÓSTICO FINAL ANTES DO HEATMAP ---
-                    st.write("DEBUG (Heatmap Data): melted_heatmap_data columns:", melted_heatmap_data.columns.tolist())
-                    st.write("DEBUG (Heatmap Data): melted_heatmap_data dtypes:", melted_heatmap_data.dtypes)
-                    st.write("DEBUG (Heatmap Data): melted_heatmap_data head():", melted_heatmap_data.head())
-                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data describe():", melted_heatmap_data.describe()) # Descomente se precisar de estatísticas
-                    st.write("DEBUG (Heatmap Data): melted_heatmap_data isnull().sum():", melted_heatmap_data.isnull().sum())
-                    # --- FIM DIAGNÓSTICO FINAL ---
-
-                    # --- DIAGNÓSTICO: Teste rápido de Heatmap ---
-                    st.write("DEBUG: Tentando teste rápido de px.heatmap com dados fictícios...")
-                    try:
-                        dummy_df = pd.DataFrame({
-                            'Col X': [1, 2, 1, 2],
-                            'Col Y': ['A', 'A', 'B', 'B'],
-                            'Valor Z': [10, 20, 30, 40]
-                        })
-                        dummy_fig = px.heatmap(dummy_df, x='Col X', y='Col Y', z='Valor Z', title='Teste Heatmap Fictício')
-                        # st.plotly_chart(dummy_fig) # Descomente se quiser ver o gráfico de teste
-                        st.write("DEBUG: Teste rápido de px.heatmap com dados fictícios BEM-SUCEDIDO.")
-                    except Exception as e:
-                        st.error(f"DEBUG: Teste rápido de px.heatmap com dados fictícios FALHOU: {e}")
-                    # --- FIM DIAGNÓSTICO ---
+                    # --- Remover código de debug ---
+                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data columns:", melted_heatmap_data.columns.tolist())
+                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data dtypes:", melted_heatmap_data.dtypes)
+                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data head():", melted_heatmap_data.head())
+                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data isnull().sum():", melted_heatmap_data.isnull().sum())
+                    # st.write("DEBUG: Tentando teste rápido de px.heatmap com dados fictícios...")
+                    # try:
+                    #     dummy_df = pd.DataFrame({
+                    #         'Col X': [1, 2, 1, 2],
+                    #         'Col Y': ['A', 'A', 'B', 'B'],
+                    #         'Valor Z': [10, 20, 30, 40]
+                    #     })
+                    #     dummy_fig = px.heatmap(dummy_df, x='Col X', y='Col Y', z='Valor Z', title='Teste Heatmap Fictício')
+                    #     # st.plotly_chart(dummy_fig) # Descomente se quiser ver o gráfico de teste
+                    #     st.write("DEBUG: Teste rápido de px.heatmap com dados fictícios BEM-SUCEDIDO.")
+                    # except Exception as e:
+                    #     st.error(f"DEBUG: Teste rápido de px.heatmap com dados fictícios FALHOU: {e}")
+                    # --- Fim remoção código de debug ---
 
 
-                    # --- Plotly Heatmap Code usando dados derretidos ---
-                    # Agora especificamos explicitamente x, y, e z
-                    # ESTA É A LINHA QUE ESTÁ CAUSANDO O ATTRIBUTEERROR (line 889)
-                    fig_heatmap = px.heatmap(
-                        melted_heatmap_data, # Passa o DataFrame derretido
-                        x='Hora do Dia',     # Nome da coluna para o eixo X
-                        y='Dia da Semana',   # Nome da coluna para o eixo Y
-                        z='Velocidade Média',# Nome da coluna para os valores/cor
-                        text_auto=True,      # Mostra o valor dentro da célula (opcional) - Plotly 5.x+
-                        aspect="auto",
-                        title="Velocidade Média por Dia da Semana e Hora",
-                        color_continuous_scale="Viridis" # Use o mesmo cmap ou similar ao viridis
-                    )
+                    # Create the figure using go.Heatmap
+                    fig_heatmap = go.Figure(go.Heatmap(
+                        x=x_data, # Horas
+                        y=y_data, # Dias da Semana
+                        z=z_data, # Valores de velocidade média
+                        colorscale="Viridis", # Use o mesmo cmap
+                        colorbar=dict(title="Velocidade Média (km/h)", titleside="right", titlefont=dict(color=TEXT_COLOR), tickfont=dict(color=TEXT_COLOR)),
+                        hoverinfo="x+y+z", # Mostra hora, dia e valor no hover
+                        texttemplate="%{z:.0f}", # Formata o texto nas células como INTEIROS (sem casas decimais)
+                        textfont={"size":10, "color": TEXT_COLOR} # Fonte para o texto nas células
+                    ))
 
                     # Configurar layout para combinar com o tema (cores, fontes)
                     fig_heatmap.update_layout(
+                        title="Velocidade Média por Dia da Semana e Hora",
                         title_font_color=TEXT_COLOR,
-                        xaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Hora do Dia", title_font_color=TEXT_COLOR),
-                        yaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Dia da Semana", title_font_color=TEXT_COLOR),
+                        xaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Hora do Dia", title_font_color=TEXT_COLOR, type='category'), # Usa tipo categoria para horas discretas
+                        yaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Dia da Semana", title_font_color=TEXT_COLOR, type='category'), # Usa tipo categoria para dias ordenados
                         plot_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do plot
                         paper_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do papel (figura)
-                        font=dict(color=TEXT_COLOR) # Cor da fonte global do gráfico
+                        font=dict(color=TEXT_COLOR), # Cor da fonte global do gráfico
+                         # margin={"r":0,"t":0,"l":0,"b":0}, # Margem opcional
                     )
-                    # O tooltip com o valor aparece por padrão ao passar o mouse com px.heatmap quando x, y, z são especificados
-
 
                     # Exibe o gráfico Plotly no Streamlit
                     st.plotly_chart(fig_heatmap, use_container_width=True)
@@ -947,6 +984,7 @@ def main():
 
                 # Botão para rodar a previsão
                 if st.button(f"Gerar Previsão para {route}", key=f"generate_forecast_{route}"):
+                     # Chamada da função de previsão ARIMA (agora com exógenas)
                      forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps)
 
                      if not forecast_df.empty:
