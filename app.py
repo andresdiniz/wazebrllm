@@ -834,14 +834,19 @@ def main():
                     pivot_table_reset = pivot_table.reset_index()
                     pivot_table_reset = pivot_table_reset.rename(columns={'index': 'Dia da Semana'}) # Nomeia a nova coluna de índice
 
-                    # Derreter o DataFrame
+                    hour_columns = [col for col in pivot_table_reset.columns if col != 'Dia da Semana']
+
+
+                    # Derreter o DataFrame, especificando explicitamente as colunas de valor (as horas)
                     melted_heatmap_data = pivot_table_reset.melt(
                         id_vars=['Dia da Semana'],        # Coluna(s) para manter como identificadores
-                        var_name='Hora do Dia',          # Nome para a nova coluna que contém os nomes das antigas colunas (horas)
-                        value_name='Velocidade Média'    # Nome para a nova coluna que contém os valores
+                        value_vars=hour_columns,         # <-- ESPECIFICAR AS COLUNAS DE HORA AQUI
+                        var_name='Hora do Dia',          # Nome para a nova coluna de variáveis
+                        value_name='Velocidade Média'    # Nome para a nova coluna de valores
                     )
 
                     # Garantir que a coluna de hora seja numérica (Plotly gosta disso para eixos numéricos)
+                    # Alguns podem ser np.int64, outros int; converter para tipo genérico
                     melted_heatmap_data['Hora do Dia'] = pd.to_numeric(melted_heatmap_data['Hora do Dia'])
 
                     # Opcional: Ordenar os dados derretidos para garantir a ordem no gráfico, embora Plotly geralmente gerencie isso
