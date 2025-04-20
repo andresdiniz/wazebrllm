@@ -168,11 +168,11 @@ h1, h2, h3, h4, h5, h6 {{
 }}
 
 /* Adiciona hover effect nos botões */
-.stButton button:hover {
+.stButton button:hover {{
     opacity: 0.9;
     transform: scale(1.02);
     transition: all 0.2s ease-in-out;
-}
+}}
 /* Ajustar o padding da página principal */
 .stApp > header, .stApp > div {{
     padding-top: 1rem;
