@@ -502,8 +502,8 @@ def create_arima_forecast(df, route_id, steps=10):
 
         return forecast_df
     except Exception as e:
-        st.error(f"Erro ao gerar modelo de previsão ARIMA com exógenas: {str(e)}")
-        st.info("Verifique se há dados suficientes (pelo menos alguns dias) e se as variáveis exógenas foram geradas corretamente.")
+        st.error(f"Erro durante o treinamento ou previsão do modelo ARIMA: {str(e)}")
+        st.info("Verifique os dados de entrada, a quantidade de dados ou os parâmetros do auto_arima.")
         return pd.DataFrame()
 
 
@@ -528,6 +528,7 @@ def save_forecast_to_db(forecast_df):
     forecast_df_mapped = forecast_df_mapped[cols_to_save]
 
     try:
+        st.info("Conectando ao banco de dados para salvar previsão...")
         # Usando credenciais do secrets
         engine = create_engine(
             f'mysql+mysqlconnector://{st.secrets["mysql"]["user"]}:{st.secrets["mysql"]["password"]}@{st.secrets["mysql"]["host"]}/{st.secrets["mysql"]["database"]}'
@@ -536,6 +537,7 @@ def save_forecast_to_db(forecast_df):
         # if_exists='append' adiciona novas linhas. Se você precisar evitar duplicatas,
         # pode precisar de uma lógica de upsert ou verificar antes de inserir.
         with engine.begin() as connection:
+             st.info("Salvando previsão na tabela forecast_history...")
              # Converte datetime para tipo compatível com SQL, como string ou timestamp
              forecast_df_mapped['data'] = forecast_df_mapped['data'].dt.strftime('%Y-%m-%d %H:%M:%S')
              forecast_df_mapped.to_sql('forecast_history', con=connection, if_exists='append', index=False)
@@ -925,16 +927,22 @@ def main():
                     z_data = pivot_table_reset[x_data].values # Pega o array numpy dos valores
 
                     # Create the figure using go.Heatmap
-                    # --- CONFIGURAÇÃO MÍNIMA DO COLORBAR PARA TESTE ---
-                    colorbar_config = dict(title="Velocidade Média (km/h)") # Apenas o título
-                    st.write("DEBUG: Configuração de colorbar sendo passada:", colorbar_config) # Linha de debug para mostrar a config
+                    # --- CONFIGURAÇÃO COMPLETA DO COLORBAR RESTAURADA ---
+                    colorbar_config = dict(
+                        title="Velocidade Média (km/h)",
+                        titleside="right",
+                        titlefont=dict(color=TEXT_COLOR),
+                        tickfont=dict(color=TEXT_COLOR)
+                    )
+                    # --- Remover linha de debug do colorbar ---
+                    # st.write("DEBUG: Configuração de colorbar sendo passada:", colorbar_config)
 
                     fig_heatmap = go.Figure(go.Heatmap(
                         x=x_data, # Horas
                         y=y_data, # Dias da Semana
                         z=z_data, # Valores de velocidade média
                         colorscale="Viridis", # Use o mesmo cmap
-                        colorbar=colorbar_config, # Usando a configuração mínima
+                        colorbar=colorbar_config, # Usando a configuração completa
                         hoverinfo="x+y+z", # Mostra hora, dia e valor no hover
                         texttemplate="%{z:.0f}", # Formata o texto nas células como inteiros
                         textfont={"size":10, "color": TEXT_COLOR} # Fonte para o texto nas células
@@ -965,65 +973,84 @@ def main():
 
                 # Botão para rodar a previsão
                 if st.button(f"Gerar Previsão para {route}", key=f"generate_forecast_{route}"):
-                     # Chamada da função de previsão ARIMA (agora com exógenas)
-                     forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps)
+                     forecast_df = pd.DataFrame() # Initialize DataFrame
 
-                     if not forecast_df.empty:
-                         st.success(f"Previsão gerada para os próximos {forecast_steps * 3} minutos.")
+                     # --- Try/Except para a Geração da Previsão ARIMA ---
+                     try:
+                         st.info(f"Iniciando geração da previsão ARIMA para {route}...")
+                         # Chamada da função de previsão ARIMA (agora com exógenas)
+                         forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps)
 
-                         # Visualizar a previsão
-                         fig_forecast = go.Figure()
+                         if not forecast_df.empty:
+                             st.success(f"Previsão gerada para os próximos {forecast_steps * 3} minutos.")
 
-                         # Adiciona os dados históricos
-                         fig_forecast.add_trace(go.Scatter(
-                             x=processed_df['data'],
-                             y=processed_df['velocidade'],
-                             mode='lines',
-                             name='Histórico',
-                             line=dict(color=TEXT_COLOR, width=2) # Cor para o histórico
-                         ))
+                             # --- Try/Except para Plotar o Gráfico de Previsão ---
+                             try:
+                                 st.info("Gerando gráfico de previsão...")
+                                 fig_forecast = go.Figure()
 
-                         # Adiciona a previsão
-                         fig_forecast.add_trace(go.Scatter(
-                             x=forecast_df['ds'],
-                             y=forecast_df['yhat'],
-                             mode='lines',
-                             name='Previsão',
-                             line=dict(color=PRIMARY_COLOR, width=3) # Cor primária para a previsão
-                         ))
+                                 # Adiciona os dados históricos
+                                 fig_forecast.add_trace(go.Scatter(
+                                     x=processed_df['data'],
+                                     y=processed_df['velocidade'],
+                                     mode='lines',
+                                     name='Histórico',
+                                     line=dict(color=TEXT_COLOR, width=2) # Cor para o histórico
+                                 ))
 
-                         # Adiciona o intervalo de confiança
-                         fig_forecast.add_trace(go.Scatter(
-                             x=pd.concat([forecast_df['ds'], forecast_df['ds'][::-1]]), # Datas para o polígono (ida e volta)
-                             y=pd.concat([forecast_df['yhat_upper'], forecast_df['yhat_lower'][::-1]]), # Limites (superior e inferior invertido)
-                             fill='toself', # Preenche a área entre as duas linhas
-                             fillcolor='rgba(0, 175, 255, 0.2)', # Cor semi-transparente (similar ao PRIMARY_COLOR)
-                             line=dict(color='rgba(255,255,255,0)'), # Linha invisível
-                             name='Intervalo de Confiança 95%'
-                         ))
+                                 # Adiciona a previsão
+                                 fig_forecast.add_trace(go.Scatter(
+                                     x=forecast_df['ds'],
+                                     y=forecast_df['yhat'],
+                                     mode='lines',
+                                     name='Previsão',
+                                     line=dict(color=PRIMARY_COLOR, width=3) # Cor primária para a previsão
+                                 ))
 
-                         # Configura o layout do gráfico de previsão
-                         fig_forecast.update_layout(
-                             title=f'Previsão de Velocidade para {route}',
-                             xaxis_title="Data/Hora",
-                             yaxis_title="Velocidade (km/h)",
-                             hovermode='x unified', # Agrupa tooltips por eixo X
-                             plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                             paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                             font=dict(color=TEXT_COLOR),
-                             title_font_color=TEXT_COLOR,
-                             xaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
-                             yaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
-                             legend=dict(font=dict(color=TEXT_COLOR))
-                         )
+                                 # Adiciona o intervalo de confiança
+                                 fig_forecast.add_trace(go.Scatter(
+                                     x=pd.concat([forecast_df['ds'], forecast_df['ds'][::-1]]), # Datas para o polígono (ida e volta)
+                                     y=pd.concat([forecast_df['yhat_upper'], forecast_df['yhat_lower'][::-1]]), # Limites (superior e inferior invertido)
+                                     fill='toself', # Preenche a área entre as duas linhas
+                                     fillcolor='rgba(0, 175, 255, 0.2)', # Cor semi-transparente (similar ao PRIMARY_COLOR)
+                                     line=dict(color='rgba(255,255,255,0)'), # Linha invisível
+                                     name='Intervalo de Confiança 95%'
+                                 ))
 
-                         st.plotly_chart(fig_forecast, use_container_width=True)
+                                 # Configura o layout do gráfico de previsão
+                                 fig_forecast.update_layout(
+                                     title=f'Previsão de Velocidade para {route}',
+                                     xaxis_title="Data/Hora",
+                                     yaxis_title="Velocidade (km/h)",
+                                     hovermode='x unified', # Agrupa tooltips por eixo X
+                                     plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
+                                     paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
+                                     font=dict(color=TEXT_COLOR),
+                                     title_font_color=TEXT_COLOR,
+                                     xaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
+                                     yaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
+                                     legend=dict(font=dict(color=TEXT_COLOR))
+                                 )
 
-                         # Botão para salvar a previsão no banco de dados
-                         if st.button(f"Salvar Previsão no Banco de Dados para {route}", key=f"save_forecast_{route}"):
-                              save_forecast_to_db(forecast_df)
-                     else:
-                         st.info("Previsão não gerada. Verifique os dados ou o período selecionado.")
+                                 st.plotly_chart(fig_forecast, use_container_width=True)
+                                 st.success("Gráfico de previsão gerado.")
+
+                                 # --- Try/Except para Salvar no Banco de Dados ---
+                                 # O botão de salvar ainda aparecerá, e a função save_forecast_to_db tem seu próprio try/except
+                                 st.info("Clique em 'Salvar Previsão...' para salvar a previsão no banco de dados.")
+
+
+                             except Exception as e:
+                                 st.error(f"Erro ao gerar ou exibir o gráfico de previsão: {e}")
+                                 st.info("Verifique se há dados suficientes na previsão gerada ou se há problemas na configuração do gráfico Plotly.")
+
+                         else:
+                             st.warning("Previsão não gerada ou DataFrame de previsão vazio. Não é possível exibir o gráfico ou salvar.")
+
+                     except Exception as e:
+                         st.error(f"Erro fatal durante a geração da previsão ARIMA: {e}")
+                         st.info("Verifique os dados de entrada, a quantidade de dados, ou a configuração do modelo ARIMA.")
+
 
                 elif f"generate_forecast_{route}" not in st.session_state:
                     # Mensagem inicial antes de gerar a previsão
