@@ -22,6 +22,7 @@ import pytz
 from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
 import datetime # Importar datetime para manipular datas
+import plotly
 
 # Configurações de compatibilidade do numpy (manter se for necessário no seu ambiente)
 # Isso pode não ser necessário dependendo da versão do numpy, mas é seguro manter
