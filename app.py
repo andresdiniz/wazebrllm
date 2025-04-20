@@ -46,91 +46,92 @@ HEADER_FONT = 'Segoe UI', 'sans-serif' # Fonte
 custom_theme = f"""
 <style>
 :root {{
-    --primary-color: {PRIMARY_COLOR};
-    --background-color: {BACKGROUND_COLOR};
-    --secondary-background-color: {SECONDARY_BACKGROUND_COLOR};
-    --accent-color: {ACCENT_COLOR};
-    --text-color: {TEXT_COLOR};
-    --header-font: {', '.join(HEADER_FONT)};
+    --primary-color: {PRIMARY_COLOR};
+    --background-color: {BACKGROUND_COLOR};
+    --secondary-background-color: {SECONDARY_BACKGROUND_COLOR};
+    --accent-color: {ACCENT_COLOR};
+    --text-color: {TEXT_COLOR};
+    --header-font: {', '.join(HEADER_FONT)};
+    /* --text-color-sidebar: {TEXT_COLOR_SIDEBAR}; <-- Linha removida ou comentada */
 }}
 
 html, body, [class*="css"] {{
-    font-family: var(--header-font);
-    color: var(--text-color);
-    background-color: var(--background-color);
+    font-family: var(--header-font);
+    color: var(--text-color);
+    background-color: var(--background-color);
 }}
 
 h1, h2, h3, h4, h5, h6 {{
-    color: var(--primary-color);
-    font-weight: 600;
+    color: var(--primary-color);
+    font-weight: 600;
 }}
 
 /* Ajustar a cor do texto dentro de expanders para melhor contraste */
 .stExpander {{
-    background-color: var(--secondary-background-color);
-    padding: 10px; /* Adiciona um pouco de padding */
-    border-radius: 8px;
-    margin-bottom: 15px; /* Espaço entre expanders */
+    background-color: var(--secondary-background-color);
+    padding: 10px; /* Adiciona um pouco de padding */
+    border-radius: 8px;
+    margin-bottom: 15px; /* Espaço entre expanders */
 }}
 
 .stExpander > div > div > p {{
-     color: var(--text-color); /* Garante que o texto dentro do expander seja visível */
+     color: var(--text-color); /* Garante que o texto dentro do expander seja visível */
 }}
 /* Ajustar cor do header do expander */
 .stExpander > div > div > .st-emotion-cache-p5msec {{
-    color: var(--text-color); /* Garante que o título do expander seja visível */
+    color: var(--text-color); /* Garante que o título do expander seja visível */
 }}
 
 
 .stApp {{
-    background-color: var(--background-color);
-    color: var(--text-color); /* Garante que o texto geral do app use a cor definida */
+    background-color: var(--background-color);
+    color: var(--text-color); /* Garante que o texto geral do app use a cor definida */
 }}
 
 /* --- Ajustes específicos para a sidebar (MELHORADOS) --- */
 .stSidebar {{
-    background-color: var(--secondary-background-color) !important; /* Garantir fundo escuro */
-    color: var(--text-color); /* Cor do texto geral na sidebar (herdado) */
+    background-color: var(--secondary-background-color) !important; /* Garantir fundo escuro */
+    color: var(--text-color); /* Cor do texto geral na sidebar (herdado) */
 }}
 
 .stSidebar .stMarkdown {{
-     color: var(--text-color); /* Garante que o markdown na sidebar use a cor definida */
+     color: var(--text-color); /* Garante que o markdown na sidebar use a cor definida */
 }}
 
 /* Melhorar aparência de elementos de input e labels dentro da sidebar */
 .stSidebar label {{ /* Alvo: todos os labels dentro da sidebar (checkbox, selectbox, slider, date input, etc.) */
-    color: var(--text-color);
+    color: var(--text-color);
 }}
 
 .stSidebar div[data-baseweb="select"] > div {{ /* Alvo: texto interno de selectbox */
-     background-color: var(--secondary-background-color);
-     color: var(--text-color);
-     border: 1px solid #555;
+     background-color: var(--secondary-background-color);
+     color: var(--text-color);
+     border: 1px solid #555;
 }}
 
 .stSidebar input[type="text"], /* Alvo: inputs de texto */
 .stSidebar input[type="date"], /* Alvo: inputs de data */
 .stSidebar input[type="number"] /* Alvo: inputs numéricos */
 {{
-    color: var(--text-color);
-    background-color: var(--secondary-background-color);
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 5px;
+    color: var(--text-color);
+    background-color: var(--secondary-background-color);
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 5px;
 }}
 
 .stSidebar .stSlider [data-baseweb="slider"] > div {{ /* Alvo: barra preenchida do slider */
-    background-color: var(--primary-color);
+    background-color: var(--primary-color);
 }}
 
 .stSidebar .stRadio > label {{ /* Alvo: labels de radio buttons */
-     color: var(--text-color);
+     color: var(--text-color);
 }}
 
 /* Garantir que o texto dos botões na sidebar seja visível */
 /* Adicione !important se a herança estiver causando problemas */
 .stSidebar button {{
-    color: white !important; /* Força a cor do texto do botão para branco */
+    color: white !important; /* Força a cor do texto do botão para branco */
 }}
 
 /* Adicionar regras para outros elementos comuns na sidebar se necessário */
@@ -140,91 +141,91 @@ h1, h2, h3, h4, h5, h6 {{
 
 
 .stButton>button {{
-    background-color: var(--primary-color);
-    color: white;
-    border-radius: 8后mpx;
-    border: none; /* Remover borda padrão */
-    padding: 10px 20px; /* Padding para melhor aparência */
-    cursor: pointer;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 8后mpx;
+    border: none; /* Remover borda padrão */
+    padding: 10px 20px; /* Padding para melhor aparência */
+    cursor: pointer;
 }}
 
 .stButton>button:hover {{
-    background-color: #0099E6; /* Cor um pouco mais escura no hover */
+    background-color: #0099E6; /* Cor um pouco mais escura no hover */
 }}
 
 .stCheckbox>label {{
-    color: var(--text-color);
+    color: var(--text-color);
 }}
 
 .stSelectbox>label {{
-    color: var(--text-color);
+    color: var(--text-color);
 }}
 /* Melhorar aparência do selectbox - Regra global */
 .stSelectbox > div[data-baseweb="select"] > div {{
-     background-color: var(--secondary-background-color);
-     color: var(--text-color);
-     border: 1px solid #555;
+     background-color: var(--secondary-background-color);
+     color: var(--text-color);
+     border: 1px solid #555;
 }}
 
 
 /* Melhorar aparência do date input - Regra global */
 .stDateInput > label {{
-    color: var(--text-color);
+    color: var(--text-color);
 }}
 
 .stDateInput input {{
-    color: var(--text-color);
-    background-color: var(--secondary-background-color);
-    border: 1px solid #555; /* Borda sutil */
-    border-radius: 4px;
-    padding: 5px;
+    color: var(--text-color);
+    background-color: var(--secondary-background-color);
+    border: 1px solid #555; /* Borda sutil */
+    border-radius: 4px;
+    padding: 5px;
 }}
 
 /* Melhorar aparência do slider - Regra global */
 .stSlider > label {{
-    color: var(--text-color);
+    color: var(--text-color);
 }}
 
 .stSlider [data-baseweb="slider"] > div {{
-    background-color: var(--primary-color); /* Cor da barra preenchida */
+    background-color: var(--primary-color); /* Cor da barra preenchida */
 }}
 
 
 .stSpinner > div > div {{
-    color: var(--primary-color); /* Cor do spinner */
+    color: var(--primary-color); /* Cor do spinner */
 }}
 
 /* Estilo para mensagens de aviso */
 .stAlert > div {{
-    background-color: rgba(255, 255, 0, 0.1); /* Amarelo semi-transparente */
-    color: {TEXT_COLOR};
-    border-color: yellow;
+    background-color: rgba(255, 255, 0, 0.1); /* Amarelo semi-transparente */
+    color: {TEXT_COLOR};
+    border-color: yellow;
 }}
 
 /* Estilo para mensagens de erro */
 .stAlert[kind="error"] > div {{
-    background-color: rgba(255, 0, 0, 0.1); /* Vermelho semi-transparente */
-    color: {TEXT_COLOR};
-    border-color: red;
+    background-color: rgba(255, 0, 0, 0.1); /* Vermelho semi-transparente */
+    color: {TEXT_COLOR};
+    border-color: red;
 }}
 
 /* Estilo para mensagens de sucesso */
 .stAlert[kind="success"] > div {{
-    background-color: rgba(0, 255, 0, 0.1); /* Verde semi-transparente */
-    color: {TEXT_COLOR};
-    border-color: green;
+    background-color: rgba(0, 255, 0, 0.1); /* Verde semi-transparente */
+    color: {TEXT_COLOR};
+    border-color: green;
 }}
 
 /* Adiciona hover effect nos botões */
 .stButton button:hover {{
-    opacity: 0.9;
-    transform: scale(1.02);
-    transition: all 0.2s ease-in-out;
+    opacity: 0.9;
+    transform: scale(1.02);
+    transition: all 0.2s ease-in-out;
 }}
 /* Ajustar o padding da página principal */
 .stApp > header, .stApp > div {{
-    padding-top: 1rem;
-    padding-bottom: 1rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
 }}
 
 </style>
