@@ -215,6 +215,58 @@ def get_db_connection():
         st.stop() # Parar a execução se não conseguir conectar
 
 
+@st.cache_data # Usar cache_data para os dados históricos, dependendo dos parâmetros
+def get_data(start_date=None, end_date=None, route_name=None):
+    mydb = None
+    mycursor = None
+    try:
+        mydb = get_db_connection()
+        mycursor = mydb.cursor()
+
+        query = """
+            SELECT hr.route_id, r.name AS route_name, hr.data, hr.velocidade
+            FROM historic_routes hr
+            JOIN routes r ON hr.route_id = r.id
+        """
+        conditions = []
+        params = []
+
+        if route_name:
+            conditions.append("r.name = %s")
+            params.append(route_name)
+        if start_date:
+            conditions.append("hr.data >= %s")
+            params.append(start_date)
+        if end_date:
+             # Para incluir o último dia completo, filtrar por < (data final + 1 dia)
+            end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+            end_date_plus_one_day_str = end_datetime.strftime('%Y-%m-%d')
+
+            conditions.append("hr.data < %s") # Usar o operador MENOR QUE (<)
+            params.append(end_date_plus_one_day_str) # Usar a data final + 1 dia
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY hr.data ASC"
+
+        mycursor.execute(query, params)
+        results = mycursor.fetchall()
+        col_names = [desc[0] for desc in mycursor.description]
+        df = pd.DataFrame(results, columns=col_names)
+
+        # Convertendo 'data' para datetime e 'velocidade' para numérico
+        df['data'] = pd.to_datetime(df['data']).dt.tz_localize(None) # Remover timezone se presente
+        df['velocidade'] = pd.to_numeric(df['velocidade'], errors='coerce')
+
+        return df, None
+    except Exception as e:
+        return pd.DataFrame(), str(e) # Retorna DataFrame vazio e erro
+    finally:
+        if mycursor:
+            mycursor.close()
+        # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
+        
 # Carregar apenas nomes das rotas (cached)
 @st.cache_data # Usar cache_data para dados estáticos como nomes de rotas
 def get_all_route_names():
