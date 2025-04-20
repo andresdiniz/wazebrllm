@@ -392,6 +392,10 @@ def create_holiday_exog(index):
         return pd.DataFrame(index=index)
 
     # Obter feriados brasileiros para os anos presentes no índice
+    # Inclui feriados estaduais/municipais se suportado pela lib e especificado (BR padrão = nacional)
+    # Para incluir estaduais/municipais, você precisaria da sigla do estado/município
+    # Ex: holidays.CountryHoliday('BR', subdiv='SP', years=...) para São Paulo
+    # Usando apenas BR para feriados nacionais como solicitado implicitamente
     br_holidays = holidays.CountryHoliday('BR', years=index.year.unique())
     exog_df = pd.DataFrame(index=index)
 
@@ -411,11 +415,11 @@ def create_holiday_exog(index):
     else:
         # Usa a frequência para calcular um offset exato de 24 horas
         one_day_offset = pd.Timedelta(days=1)
-        # Cria uma série de datas exatamente 24 horas no futuro com base na frequência do índice
+        # Cria uma série de dates exatamente 24 horas no futuro com base na frequência do índice
         dates_in_24h = index + one_day_offset
-        # Verifica se a data 24 horas depois é um feriado
+        # Verifica se a data 24 hours later é um feriado
         is_next_day_holiday = dates_in_24h.to_series().apply(lambda date: date.date() in br_holidays).astype(int)
-        # Uma data é véspera de feriado se a data 24h depois é feriado E a data atual NÃO é feriado
+        # Uma data é véspera de feriado se a data 24h later é feriado E a data atual NÃO é feriado
         exog_df['is_pre_holiday'] = is_next_day_holiday & (exog_df['is_holiday'] == 0)
 
     return exog_df
@@ -431,7 +435,7 @@ def create_arima_forecast(df, route_id, steps=10):
 
     # Preparar dados para auto_arima (já vem limpo)
     # Garantir frequência temporal, interpolando se houver lacunas curtas
-    # Use dropna(subset=['velocidade']) aqui para remover NaNs após asfreq se houver
+    # Use dropna(subset=['velocidade']) here too, just in case asfreq introduced NaNs where original df had them
     arima_data_full = df.set_index('data')['velocidade'].asfreq('3min').dropna()
 
     # Criar features exógenas (feriados e vésperas) para o período dos dados históricos
@@ -439,7 +443,8 @@ def create_arima_forecast(df, route_id, steps=10):
 
     # Alinhar dados da série temporal (y) e dados exógenos (X) usando um join interno
     # Isso garante que temos 'y' e 'X' para os mesmos timestamps
-    combined_df = pd.DataFrame({'y': arima_data_full}).join(exog_data_full, how='inner').dropna()
+    # Drop NaNs that might result from the inner join if alignment fails
+    combined_df = arima_data_full.to_frame(name='y').join(exog_data_full, how='inner').dropna()
     arima_data = combined_df['y']
     exog_data = combined_df[['is_holiday', 'is_pre_holiday']]
 
@@ -449,7 +454,7 @@ def create_arima_forecast(df, route_id, steps=10):
     # Se usarmos variáveis exógenas, o auto_arima precisa de dados suficientes para
     # estimar os parâmetros sazonais E os parâmetros das exógenas.
     # Um mínimo de 2-3 ciclos sazonais é recomendado (ex: 2-3 semanas).
-    min_data_points = 3 * 24 * (60/3) # Mínimo ~3 dias de dados com freq de 3min (para detectar sazonalidade diária)
+    min_data_points = 3 * 480 # Mínimo ~3 dias de dados com freq de 3min (para detectar sazonalidade diária)
     # Para sazonalidade semanal (que o auto_arima detectaria com m=480*7), precisaríamos de ~3 semanas.
     # Vamos manter um requisito mínimo razoável para evitar falhas, mas alertar sobre a necessidade de mais dados para melhor precisão sazonal/exógena.
 
@@ -604,13 +609,6 @@ def main():
         st.error("As credenciais do banco de dados não foram configuradas corretamente no secrets.toml.")
         st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` na raiz do seu projeto com as informações de conexão do MySQL.")
         st.stop() # Parar a execução
-
-    # --- Remover diagnóstico de versão do Plotly ---
-    # try:
-    #     st.write(f"DEBUG: Plotly version: {plotly.__version__}")
-    # except Exception as e:
-    #     st.error(f"DEBUG: Não foi possível verificar a versão do Plotly: {e}")
-    # --- Fim remoção diagnóstico ---
 
 
     with st.sidebar:
@@ -926,36 +924,19 @@ def main():
                     # Z data: Os valores do corpo da tabela pivotada
                     z_data = pivot_table_reset[x_data].values # Pega o array numpy dos valores
 
-
-                    # --- Remover código de debug ---
-                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data columns:", melted_heatmap_data.columns.tolist())
-                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data dtypes:", melted_heatmap_data.dtypes)
-                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data head():", melted_heatmap_data.head())
-                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data isnull().sum():", melted_heatmap_data.isnull().sum())
-                    # st.write("DEBUG: Tentando teste rápido de px.heatmap com dados fictícios...")
-                    # try:
-                    #     dummy_df = pd.DataFrame({
-                    #         'Col X': [1, 2, 1, 2],
-                    #         'Col Y': ['A', 'A', 'B', 'B'],
-                    #         'Valor Z': [10, 20, 30, 40]
-                    #     })
-                    #     dummy_fig = px.heatmap(dummy_df, x='Col X', y='Col Y', z='Valor Z', title='Teste Heatmap Fictício')
-                    #     # st.plotly_chart(dummy_fig) # Descomente se quiser ver o gráfico de teste
-                    #     st.write("DEBUG: Teste rápido de px.heatmap com dados fictícios BEM-SUCEDIDO.")
-                    # except Exception as e:
-                    #     st.error(f"DEBUG: Teste rápido de px.heatmap com dados fictícios FALHOU: {e}")
-                    # --- Fim remoção código de debug ---
-
-
                     # Create the figure using go.Heatmap
+                    # --- CONFIGURAÇÃO MÍNIMA DO COLORBAR PARA TESTE ---
+                    colorbar_config = dict(title="Velocidade Média (km/h)") # Apenas o título
+                    st.write("DEBUG: Configuração de colorbar sendo passada:", colorbar_config) # Linha de debug para mostrar a config
+
                     fig_heatmap = go.Figure(go.Heatmap(
                         x=x_data, # Horas
                         y=y_data, # Dias da Semana
                         z=z_data, # Valores de velocidade média
                         colorscale="Viridis", # Use o mesmo cmap
-                        colorbar=dict(title="Velocidade Média (km/h)", titleside="right", titlefont=dict(color=TEXT_COLOR), tickfont=dict(color=TEXT_COLOR)),
+                        colorbar=colorbar_config, # Usando a configuração mínima
                         hoverinfo="x+y+z", # Mostra hora, dia e valor no hover
-                        texttemplate="%{z:.0f}", # Formata o texto nas células como INTEIROS (sem casas decimais)
+                        texttemplate="%{z:.0f}", # Formata o texto nas células como inteiros
                         textfont={"size":10, "color": TEXT_COLOR} # Fonte para o texto nas células
                     ))
 
