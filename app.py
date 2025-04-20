@@ -655,9 +655,9 @@ def gerar_insights(df):
         weekday_avg = df.groupby('day_of_week')['velocidade'].mean()
         if not weekday_avg.empty:
             # Mapeamento para português e ordenação
-            dias_pt_map = {
+             dias_pt_map = {
                 'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
-                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Domingo': 'Sunday'
+                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Sunday': 'Domingo' # <-- Esta é a linha 660 corrigida
             }
             weekday_avg_pt = weekday_avg.rename(index=dias_pt_map)
             dias_ordenados_pt = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
