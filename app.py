@@ -21,24 +21,22 @@ import mysql.connector
 import pytz
 from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
+import datetime # Importar datetime para manipular datas
 
 # Configurações de compatibilidade do numpy (manter se for necessário no seu ambiente)
+# Isso pode não ser necessário dependendo da versão do numpy, mas é seguro manter
 if np.__version__.startswith('2.'):
     np.float_ = np.float64
     np.int_ = np.int_
     np.bool_ = np.bool_
 
-# Não use este TIMEZONE diretamente para localizar o DF, use .dt.tz_localize(None)
-# e .dt.tz_convert se precisar de timezone aware
-TIMEZONE = pytz.timezone('America/Sao_Paulo')
-
 # Tema personalizado MELHORADO E COERENTE COM FUNDO ESCURO
 # Definindo as cores em variáveis para fácil referência
-PRIMARY_COLOR = "#00AFFF"        # Azul mais claro e vibrante
-BACKGROUND_COLOR = "#1E1E1E"     # Cinza escuro para o fundo principal
+PRIMARY_COLOR = "#00AFFF"         # Azul mais claro e vibrante
+BACKGROUND_COLOR = "#1E1E1E"      # Cinza escuro para o fundo principal
 SECONDARY_BACKGROUND_COLOR = "#2D2D2D" # Cinza um pouco mais claro para sidebar/elementos
-ACCENT_COLOR = "#FF4B4B"         # Vermelho para destaque/alertas
-TEXT_COLOR = "#FFFFFF"           # Branco
+ACCENT_COLOR = "#FF4B4B"          # Vermelho para destaque/alertas
+TEXT_COLOR = "#FFFFFF"            # Branco
 HEADER_FONT = 'Segoe UI', 'sans-serif' # Fonte
 
 custom_theme = f"""
@@ -74,6 +72,11 @@ h1, h2, h3, h4, h5, h6 {{
 .stExpander > div > div > p {{
      color: var(--text-color); /* Garante que o texto dentro do expander seja visível */
 }}
+/* Ajustar cor do header do expander */
+.stExpander > div > div > .st-emotion-cache-p5msec {{
+    color: var(--text-color); /* Garante que o título do expander seja visível */
+}}
+
 
 .stApp {{
     background-color: var(--background-color);
@@ -109,6 +112,13 @@ h1, h2, h3, h4, h5, h6 {{
 .stSelectbox>label {{
     color: var(--text-color);
 }}
+/* Melhorar aparência do selectbox */
+.stSelectbox > div[data-baseweb="select"] > div {{
+     background-color: var(--secondary-background-color);
+     color: var(--text-color);
+     border: 1px solid #555;
+}}
+
 
 /* Melhorar aparência do date input */
 .stDateInput > label {{
@@ -119,7 +129,7 @@ h1, h2, h3, h4, h5, h6 {{
     color: var(--text-color);
     background-color: var(--secondary-background-color);
     border: 1px solid #555; /* Borda sutil */
-    border-radius: 4px;
+    border-radius: 4 cuarta
     padding: 5px;
 }}
 
@@ -157,10 +167,22 @@ h1, h2, h3, h4, h5, h6 {{
     border-color: green;
 }}
 
+/* Adiciona hover effect nos botões */
+.stButton button:hover {
+    opacity: 0.9;
+    transform: scale(1.02);
+    transition: all 0.2s ease-in-out;
+}
+/* Ajustar o padding da página principal */
+.stApp > header, .stApp > div {{
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}}
 
 </style>
 """
 st.markdown(custom_theme, unsafe_allow_html=True)
+
 
 # --- Funções de Banco de Dados e Carga ---
 
@@ -174,8 +196,10 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # database = "u335174317_wazeportal"
 
 # faz conexxão com o banco de dados MySQL (cached)
+@st.cache_resource # Usar cache_resource para conexões de DB
 def get_db_connection():
     try:
+        # Configuração de pooling ou outras otimizações podem ser adicionadas aqui
         conn = mysql.connector.connect(
             host=st.secrets["mysql"]["host"],
             user=st.secrets["mysql"]["user"],
@@ -187,7 +211,9 @@ def get_db_connection():
         st.error(f"Erro ao conectar ao banco de dados: {e}")
         st.stop() # Parar a execução se não conseguir conectar
 
+
 # Carregar apenas nomes das rotas (cached)
+@st.cache_data # Usar cache_data para dados estáticos como nomes de rotas
 def get_all_route_names():
     mydb = None
     mycursor = None
@@ -204,8 +230,9 @@ def get_all_route_names():
     finally:
         if mycursor:
             mycursor.close()
-        # Não feche a conexão aqui se estiver usando @st.cache_resource
+        # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
+@st.cache_data # Usar cache_data para os dados históricos, dependendo dos parâmetros
 def get_data(start_date=None, end_date=None, route_name=None):
     mydb = None
     mycursor = None
@@ -213,7 +240,6 @@ def get_data(start_date=None, end_date=None, route_name=None):
         mydb = get_db_connection()
         mycursor = mydb.cursor()
 
-        # Modificado para filtrar por nome da rota diretamente
         query = """
             SELECT hr.route_id, r.name AS route_name, hr.data, hr.velocidade
             FROM historic_routes hr
@@ -223,18 +249,15 @@ def get_data(start_date=None, end_date=None, route_name=None):
         params = []
 
         if route_name:
-             conditions.append("r.name = %s")
-             params.append(route_name)
+            conditions.append("r.name = %s")
+            params.append(route_name)
         if start_date:
-            # Para a data de início, <= é correto se a hora for 00:00:00,
-            # ou >= se quisermos incluir o início do dia. >= é mais comum.
             conditions.append("hr.data >= %s")
             params.append(start_date)
         if end_date:
-            # CORREÇÃO: Para incluir o último dia completo, filtrar por < (data final + 1 dia)
-            # Converte a string de data final para objeto datetime, adiciona 1 dia e converte de volta para string YYYY-MM-DD
+             # Para incluir o último dia completo, filtrar por < (data final + 1 dia)
             end_datetime = pd.to_datetime(end_date) + pd.Timedelta(days=1)
-            end_date_plus_one_day_str = end_datetime.strftime('%Y-%m-%d') # Formatar como YYYY-MM-DD
+            end_date_plus_one_day_str = end_datetime.strftime('%Y-%m-%d')
 
             conditions.append("hr.data < %s") # Usar o operador MENOR QUE (<)
             params.append(end_date_plus_one_day_str) # Usar a data final + 1 dia
@@ -259,8 +282,9 @@ def get_data(start_date=None, end_date=None, route_name=None):
     finally:
         if mycursor:
             mycursor.close()
+        # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-
+@st.cache_data # Usar cache_data para coordenadas de rota
 def get_route_coordinates(route_id):
     mydb = None
     mycursor = None
@@ -278,14 +302,15 @@ def get_route_coordinates(route_id):
     finally:
         if mycursor:
             mycursor.close()
-        # Não feche a conexão aqui se estiver usando @st.cache_resource
+        # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
 # --- Funções de Processamento e Análise ---
 
+# Esta função processa o DataFrame e pode ser chamada após carregar os dados
 def clean_data(df):
-    # Assume que o DataFrame já está filtrado pela rota e período
     df = df.copy()
-    # df['data'] = pd.to_datetime(df['data']).dt.tz_localize(None) # Já feito em get_data
+    # Assume que o DataFrame já está filtrado pela rota e período
+    # e que a coluna 'data' já é datetime sem timezone e 'velocidade' é numérica
     df = df.sort_values('data')
     df['velocidade'] = (
         df['velocidade']
@@ -295,32 +320,12 @@ def clean_data(df):
         .bfill() # Preenche valores restantes com o próximo valor válido
     )
     # Recalcular dia da semana e hora após interpolação/limpeza, se necessário
-    df['day_of_week'] = df['data'].dt.day_name()
+    # Usar locale para nomes dos dias em português
+    # import locale
+    # locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8') # Configurar localidade (pode precisar instalar no ambiente)
+    df['day_of_week'] = df['data'].dt.day_name() # Retorna em inglês por padrão, mapearemos para o heatmap
     df['hour'] = df['data'].dt.hour
     return df.dropna(subset=['velocidade']) # Remove linhas onde a velocidade ainda é NaN
-
-def detect_anomalies(df):
-    # Esta função não está sendo usada no main, mas mantida e revisada
-    df = df.copy()
-    if len(df) < 2: # Precisa de pelo menos 2 pontos para calcular a diferença
-        return pd.DataFrame()
-    df['vel_diff'] = df['velocidade'].diff().abs()
-    # Aumentar o multiplicador para tornar a detecção de anomalias menos sensível a pequenas variações
-    threshold = df['vel_diff'].quantile(0.98) * 2 # Ajuste o multiplicador conforme necessário
-    # Garantir um limite mínimo para evitar detectar ruído em dados muito estáveis
-    min_threshold = 10 # Ex: 10 km/h de diferença instantânea
-    final_threshold = max(threshold, min_threshold)
-
-    # Filtra pontos onde a diferença é maior que o limite E a velocidade em si parece incomum
-    # (ex: velocidade muito baixa ou muito alta comparada à média)
-    anomalies = df[
-        (df['vel_diff'] > final_threshold) &
-        (
-            (df['velocidade'] < df['velocidade'].mean() * 0.5) | # Exemplo: velocidade < 50% da média
-            (df['velocidade'] > df['velocidade'].mean() * 1.5)   # Exemplo: velocidade > 150% da média
-        )
-    ].copy()
-    return anomalies
 
 
 # Função de decomposição sazonal (revisada para usar índice de tempo e frequência)
@@ -334,8 +339,9 @@ def seasonal_decomposition_plot(df):
     df_ts = df.set_index('data')['velocidade'].asfreq('3min')
 
     # Interpolar apenas se houver dados suficientes após asfreq
-    if len(df_ts.dropna()) < len(df_ts) * 0.8: # Exemplo: exige pelo menos 80% dos dados para interpolar
-         st.warning("Muitos dados faltantes para interpolação e decomposição sazonal confiáveis.")
+    # Verifica a proporção de NaNs antes de interpolar
+    if df_ts.isnull().sum() / len(df_ts) > 0.2: # Exemplo: Se mais de 20% dos dados são NaN após asfreq
+         st.warning("Muitos dados faltantes ou espaçados para interpolação e decomposição sazonal confiáveis.")
          return
 
     df_ts = df_ts.interpolate(method='time')
@@ -343,6 +349,7 @@ def seasonal_decomposition_plot(df):
     # O período para sazonalidade diária em dados de 3 em 3 minutos é 480 (24 horas * 60 min / 3 min)
     period = 480
 
+    # Precisa de pelo menos 2 ciclos completos de dados para decomposição sazonal
     if len(df_ts.dropna()) < 2 * period:
          st.warning(f"Dados insuficientes para decomposição sazonal com período de {period}. Necessário pelo menos {2*period} pontos de dados válidos.")
          return
@@ -364,8 +371,8 @@ def seasonal_decomposition_plot(df):
             a.title.set_color(TEXT_COLOR)
             a.xaxis.label.set_color(TEXT_COLOR)
             a.yaxis.label.set_color(TEXT_COLOR)
-            # O fundo dos subplots pode ser ajustado se necessário, mas tight_layout ajuda
-            # a.set_facecolor(SECONDARY_BACKGROUND_COLOR)
+            # Fundo dos subplots
+            a.set_facecolor(SECONDARY_BACKGROUND_COLOR)
 
         # Configurar cor de fundo da figura
         fig.patch.set_facecolor(SECONDARY_BACKGROUND_COLOR)
@@ -377,6 +384,8 @@ def seasonal_decomposition_plot(df):
 
 
 # Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados)
+# Não cacheamos previsões pois elas dependem de dados recentes e podem ser acionadas pelo usuário
+# @st.cache_data # Não use cache_data para previsões se elas devem ser geradas sob demanda
 def create_arima_forecast(df, route_id, steps=10):
     if df.empty:
         return pd.DataFrame()
@@ -385,18 +394,22 @@ def create_arima_forecast(df, route_id, steps=10):
     # Garantir frequência temporal, interpolando se houver lacunas curtas
     arima_data = df.set_index('data')['velocidade'].asfreq('3min').dropna()
 
-    if len(arima_data) < 24 * 7 * (60/3): # Exemplo: exige pelo menos 1 semana de dados com frequência de 3min para um ARIMA sazonal robusto
-         st.warning("Dados insuficientes para um modelo de previsão ARIMA sazonal robusto. Necessário mais dados históricos (ex: pelo menos 1 semana).")
+    # Precisa de dados suficientes para o modelo sazonal ARIMA
+    # Uma semana de dados (3min freq) = 480 pontos/dia * 7 dias = 3360 pontos
+    min_data_points = 24 * 7 * (60/3) # Mínimo ~1 semana de dados com freq de 3min
+    if len(arima_data) < min_data_points:
+         st.warning(f"Dados insuficientes ({len(arima_data)} pontos) para um modelo de previsão ARIMA sazonal robusto. Necessário mais dados históricos (ex: pelo menos 1 semana com frequência de 3min, aproximadamente {int(min_data_points)} pontos).")
          return pd.DataFrame()
 
     try:
         # auto_arima encontrará os melhores parâmetros p,d,q,P,D,Q
         # m=480 para sazonalidade diária em dados de 3 em 3 minutos
         # Adicionado stepwise=True para acelerar, n_fits para limitar tentativas, random_state para reprodutibilidade
-        model = auto_arima(arima_data, seasonal=True, m=480,
-                           error_action='ignore', suppress_warnings=True,
-                           stepwise=True, random_state=42,
-                           n_fits=20) # Limitar o número de fits para evitar tempo excessivo
+        with st.spinner(f"Treinando modelo ARIMA para a rota {route_id}..."):
+             model = auto_arima(arima_data, seasonal=True, m=480,
+                                error_action='ignore', suppress_warnings=True,
+                                stepwise=True, random_state=42,
+                                n_fits=20) # Limitar o número de fits para evitar tempo excessivo
 
         # Realizar a previsão com intervalos de confiança
         forecast, conf_int = model.predict(n_periods=steps, return_conf_int=True)
@@ -430,9 +443,8 @@ def save_forecast_to_db(forecast_df):
         st.warning("Não há previsão para salvar no banco de dados.")
         return # Não salva se o DataFrame estiver vazio
 
-    # Ajustar nomes de colunas para corresponder à tabela forecast_history, se necessário
+    # Ajustar nomes de colunas para corresponder à tabela forecast_history
     # Assumindo que a tabela forecast_history tem colunas como 'data', 'previsao', 'limite_inferior', 'limite_superior', 'id_rota'
-    # Ajuste conforme a estrutura real da sua tabela 'forecast_history'
     forecast_df_mapped = forecast_df.rename(columns={
         'ds': 'data',
         'yhat': 'previsao',
@@ -441,33 +453,25 @@ def save_forecast_to_db(forecast_df):
         'id_route': 'id_rota'
     })
 
+    # Selecionar apenas as colunas que você quer salvar
+    cols_to_save = ['data', 'previsao', 'limite_inferior', 'limite_superior', 'id_rota']
+    forecast_df_mapped = forecast_df_mapped[cols_to_save]
+
     try:
         # Usando credenciais do secrets
         engine = create_engine(
             f'mysql+mysqlconnector://{st.secrets["mysql"]["user"]}:{st.secrets["mysql"]["password"]}@{st.secrets["mysql"]["host"]}/{st.secrets["mysql"]["database"]}'
         )
         # Usando o gerenciador de contexto do SQLAlchemy para garantir commit/rollback e fechar a conexão
+        # if_exists='append' adiciona novas linhas. Se você precisar evitar duplicatas,
+        # pode precisar de uma lógica de upsert ou verificar antes de inserir.
         with engine.begin() as connection:
              forecast_df_mapped.to_sql('forecast_history', con=connection, if_exists='append', index=False)
              st.success("Previsão salva no banco de dados!") # Feedback ao usuário
     except Exception as e:
         st.error(f"Erro ao salvar previsão no banco de dados: {e}")
 
-def check_alerts(data):
-    alerts = []
-    for rule_name, rule in ALERT_RULES.items():
-        if rule['condition'](data).iloc[-1]:
-            alerts.append(rule['message'].format(data['route_name'].iloc[0]))
-    return alerts
-
-def simulate_scenario(base_data, parameters):
-    simulated = base_data.copy()
-    # Aplicar parâmetros de simulação
-    simulated['velocidade'] *= parameters.get('speed_factor', 1)
-    # Adicionar ruído
-    simulated['velocidade'] += np.random.normal(0, parameters.get('noise', 0))
-    return simulated
-
+# Função de geração de insights automáticos
 def gerar_insights(df):
     insights = []
     if df.empty:
@@ -476,32 +480,41 @@ def gerar_insights(df):
     media_geral = df['velocidade'].mean()
     insights.append(f"📌 Velocidade média geral: **{media_geral:.2f} km/h**")
 
-    # Encontrar o dia e hora mais lentos dentro do período selecionado
+    # Encontrar o dia (data específica) com a menor velocidade média dentro do período selecionado
     if 'data' in df.columns and not df['data'].empty:
+        # Agrupar por data (apenas a parte da data)
         daily_avg = df.groupby(df['data'].dt.date)['velocidade'].mean()
         if not daily_avg.empty:
             dia_mais_lento_date = daily_avg.idxmin()
             velocidade_dia_mais_lento = daily_avg.min()
-            insights.append(f"📅 Dia com a menor velocidade média: **{dia_mais_lento_date}** ({velocidade_dia_mais_lento:.2f} km/h)")
+            insights.append(f"📅 Dia com a menor velocidade média: **{dia_mais_lento_date.strftime('%d/%m/%Y')}** ({velocidade_dia_mais_lento:.2f} km/h)")
         else:
              insights.append("Não foi possível calcular a velocidade média diária.")
     else:
          insights.append("Coluna 'data' não encontrada ou vazia no DataFrame para insights diários.")
 
 
+    # Encontrar o dia da semana mais lento em média
     if 'day_of_week' in df.columns and not df['day_of_week'].empty:
         weekday_avg = df.groupby('day_of_week')['velocidade'].mean()
         if not weekday_avg.empty:
-            # Reordenar para encontrar o dia da semana mais lento na ordem correta
-            dias_ordenados = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-            weekday_avg = weekday_avg.reindex(dias_ordenados)
-            dia_da_semana_mais_lento = weekday_avg.idxmin()
-            insights.append(f"📅 Dia da semana mais lento (em média): **{dia_da_semana_mais_lento}**")
+            # Mapeamento para português e ordenação
+            dias_pt_map = {
+                'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
+                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Sunday': 'Domingo'
+            }
+            weekday_avg_pt = weekday_avg.rename(index=dias_pt_map)
+            dias_ordenados_pt = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
+            weekday_avg_pt = weekday_avg_pt.reindex(dias_ordenados_pt)
+
+            dia_da_semana_mais_lento = weekday_avg_pt.idxmin()
+            insights.append(f"🗓️ Dia da semana mais lento (em média): **{dia_da_semana_mais_lento}**")
         else:
             insights.append("Não foi possível calcular a velocidade média por dia da semana.")
     else:
         insights.append("Coluna 'day_of_week' não encontrada ou vazia no DataFrame para insights por dia da semana.")
 
+    # Encontrar a hora do dia mais lenta em média
     if 'hour' in df.columns and not df['hour'].empty:
         hourly_avg = df.groupby('hour')['velocidade'].mean()
         if not hourly_avg.empty:
@@ -515,14 +528,13 @@ def gerar_insights(df):
 
     return "\n\n".join(insights)
 
-
 # --- Função Principal do Aplicativo Streamlit ---
 
 def main():
     # Verificar se as secrets do banco de dados estão configuradas
     if "mysql" not in st.secrets or not all(k in st.secrets["mysql"] for k in ("host", "user", "password", "database")):
         st.error("As credenciais do banco de dados não foram configuradas corretamente no secrets.toml.")
-        st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` com as informações de conexão do MySQL.")
+        st.markdown("Por favor, crie ou atualize o arquivo `.streamlit/secrets.toml` na raiz do seu projeto com as informações de conexão do MySQL.")
         st.stop() # Parar a execução
 
     with st.sidebar:
@@ -546,26 +558,36 @@ def main():
              st.stop() # Parar se não houver rotas
 
         # Usar índice para garantir que o selectbox não quebre se o nome da rota mudar ou não existir
+        # Usar session_state para persistir a seleção de rota
+        if "main_route_select" not in st.session_state or st.session_state.main_route_select not in all_route_names:
+             st.session_state.main_route_select = all_route_names[0]
+
         try:
-            default_main_route_index = all_route_names.index(st.session_state.get("main_route_select", all_route_names[0]))
+            default_main_route_index = all_route_names.index(st.session_state.main_route_select)
         except ValueError:
-             default_main_route_index = 0 # Usar o primeiro se o valor armazenado não for válido
+             default_main_route_index = 0
 
         route_name = st.selectbox(
             "Rota Principal:",
             all_route_names,
             index=default_main_route_index,
-            key="main_route_select"
+            key="main_route_select_box" # Use um key diferente do session_state key
         )
+        # Atualiza o session_state key após o selectbox
+        st.session_state.main_route_select = route_name
+
 
         compare_enabled = st.checkbox("Comparar com outra rota", key="compare_checkbox")
         second_route = None
         if compare_enabled:
             available_for_comparison = [r for r in all_route_names if r != route_name]
             if available_for_comparison:
-                 # Usar índice para a rota secundária também
+                 # Usar session_state para persistir a seleção da rota secundária
+                 if "secondary_route_select" not in st.session_state or st.session_state.secondary_route_select not in available_for_comparison:
+                      st.session_state.secondary_route_select = available_for_comparison[0]
+
                  try:
-                     default_secondary_route_index = available_for_comparison.index(st.session_state.get("secondary_route_select", available_for_comparison[0]))
+                     default_secondary_route_index = available_for_comparison.index(st.session_state.secondary_route_select)
                  except ValueError:
                       default_secondary_route_index = 0
 
@@ -573,8 +595,11 @@ def main():
                      "Rota Secundária:",
                      available_for_comparison,
                      index=default_secondary_route_index,
-                     key="secondary_route_select"
+                     key="secondary_route_select_box" # Use um key diferente do session_state key
                  )
+                 # Atualiza o session_state key
+                 st.session_state.secondary_route_select = second_route
+
             else:
                  st.info("Não há outras rotas disponíveis para comparação.")
                  compare_enabled = False # Desabilita comparação se não houver outras rotas
@@ -582,31 +607,46 @@ def main():
 
         st.subheader("Período de Análise")
         # Usar um seletor de data por rota para flexibilidade na comparação de períodos diferentes
+        # Usar session_state para persistir as datas
+        today = datetime.date.today()
+        week_ago = today - datetime.timedelta(days=7)
+
         col_date1, col_date2 = st.columns(2)
         with col_date1:
-            date_range_main = st.date_input(
-                f"Período para '{route_name}'",
-                value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
-                max_value=pd.to_datetime('today').date(),
-                key=f"date_range_{route_name}"
-            )
+             # Initialize session state for date range if not exists
+             if f"date_range_{route_name}" not in st.session_state:
+                 st.session_state[f"date_range_{route_name}"] = (week_ago, today)
+
+             date_range_main_input = st.date_input(
+                 f"Período para '{route_name}'",
+                 value=st.session_state[f"date_range_{route_name}"],
+                 max_value=today,
+                 key=f"date_range_{route_name}_input" # Use um key diferente
+             )
+             # Update session state
+             st.session_state[f"date_range_{route_name}"] = date_range_main_input
+             date_range_main = st.session_state[f"date_range_{route_name}"] # Use o valor persistido
+
 
         date_range_secondary = None
         if compare_enabled and second_route:
              with col_date2:
-                 date_range_secondary = st.date_input(
-                    f"Período para '{second_route}'",
-                    value=((pd.to_datetime('today') - pd.Timedelta(days=7)).date(), pd.to_datetime('today').date()), # CORRIGIDO AQUI
-                    max_value=pd.to_datetime('today').date(),
-                    key=f"date_range_{second_route}"
-                )
-                 # A validação de data final anterior à inicial já está logo abaixo, isso é bom
-                 # if date_range_secondary[0] > date_range_secondary[1]:
-                 #     st.error("Data final da rota secundária não pode ser anterior à data inicial.")
-                 #     st.stop()
+                 # Initialize session state for date range if not exists
+                 if f"date_range_{second_route}" not in st.session_state:
+                      st.session_state[f"date_range_{second_route}"] = (week_ago, today)
+
+                 date_range_secondary_input = st.date_input(
+                      f"Período para '{second_route}'",
+                      value=st.session_state[f"date_range_{second_route}"],
+                      max_value=today,
+                      key=f"date_range_{second_route}_input" # Use um key diferente
+                 )
+                 # Update session state
+                 st.session_state[f"date_range_{second_route}"] = date_range_secondary_input
+                 date_range_secondary = st.session_state[f"date_range_{second_route}"] # Use o valor persistido
 
 
-        # Validar as datas (este bloco já estava correto)
+        # Validar as datas
         if date_range_main and date_range_main[0] > date_range_main[1]:
             st.error("Data final da rota principal não pode ser anterior à data inicial")
             st.stop()
@@ -629,29 +669,36 @@ def main():
         if date_range is None: # Caso a comparação esteja habilitada, mas a rota secundária não tenha range
              continue
 
-        start_date = date_range[0].strftime('%Y-%m-%d')
-        end_date = date_range[1].strftime('%Y-%m-%d')
+        # Converter objetos date para strings YYYY-MM-DD para passar para get_data
+        start_date_str = date_range[0].strftime('%Y-%m-%d')
+        end_date_str = date_range[1].strftime('%Y-%m-%d')
 
-        with st.spinner(f'Carregando e processando dados para {route} de {start_date} a {end_date}...'):
+        with st.spinner(f'Carregando e processando dados para {route} de {start_date_str} a {end_date_str}...'):
             # Carregar dados filtrando por nome da rota e período (cached)
             raw_df, error = get_data(
-                start_date=start_date,
-                end_date=end_date,
+                start_date=start_date_str,
+                end_date=end_date_str,
                 route_name=route
             )
 
             if error:
-                st.error(f"Erro ao carregar dados para {route}: {error}")
-                routes_info[route] = {'data': pd.DataFrame(), 'id': None, 'error': error}
-                continue # Pula para a próxima rota se houver erro
+                 st.error(f"Erro ao carregar dados para {route}: {error}")
+                 routes_info[route] = {'data': pd.DataFrame(), 'id': None, 'error': error}
+                 continue # Pula para a próxima rota se houver erro
 
             if raw_df.empty:
-                st.warning(f"Nenhum dado encontrado para a rota '{route}' no período de {start_date} a {end_date}. Por favor, ajuste o intervalo de datas.")
+                st.warning(f"Nenhum dado encontrado para a rota '{route}' no período de {start_date_str} a {end_date_str}. Por favor, ajuste o intervalo de datas.")
                 routes_info[route] = {'data': pd.DataFrame(), 'id': None}
                 continue # Pula para a próxima rota
 
             # Obter o ID da rota (assumindo que há apenas um ID por nome no período selecionado)
-            route_id = raw_df['route_id'].iloc[0]
+            # Se houver dados, deve haver um route_id
+            try:
+                 route_id = raw_df['route_id'].iloc[0]
+            except IndexError:
+                 st.error(f"Não foi possível obter o ID da rota para '{route}'.")
+                 routes_info[route] = {'data': pd.DataFrame(), 'id': None}
+                 continue
 
             # Limpar e processar os dados
             processed_df = clean_data(raw_df)
@@ -662,6 +709,7 @@ def main():
             }
         st.success(f"Dados para {route} carregados e processados ({len(processed_df)} registros).")
 
+
     # --- Seção de Visualização ---
 
     # Se não houver dados carregados para nenhuma rota, parar por aqui
@@ -671,73 +719,86 @@ def main():
 
 
     st.header("🗺️ Visualização Geográfica")
+    # O mapa é exibido por rota dentro do loop de processamento
     for route in routes_to_process:
-        if route in routes_info and not routes_info[route]['data'].empty:
-            route_id = routes_info[route]['id']
-            with st.expander(f"Mapa da Rota: {route}", expanded=True):
-                # Obter coordenadas da rota (cached)
-                route_coords = get_route_coordinates(route_id)
+         # Verifica se a rota foi carregada com sucesso e tem dados
+         if route in routes_info and not routes_info[route]['data'].empty:
+             route_id = routes_info[route]['id']
+             # O expander deve ser dentro do loop para que cada rota tenha seu mapa
+             with st.expander(f"Mapa da Rota: {route}", expanded=True):
+                  # Obter coordenadas da rota (cached)
+                  route_coords = get_route_coordinates(route_id)
 
-                if not route_coords.empty:
-                    # Calcular bounds para centralizar o mapa
-                    min_lat, max_lat = route_coords['latitude'].min(), route_coords['latitude'].max()
-                    min_lon, max_lon = route_coords['longitude'].min(), route_coords['longitude'].max()
+                  if not route_coords.empty:
+                      # Calcular bounds para centralizar o mapa
+                      min_lat, max_lat = route_coords['latitude'].min(), route_coords['latitude'].max()
+                      min_lon, max_lon = route_coords['longitude'].min(), route_coords['longitude'].max()
 
-                    # Adicionar um pequeno buffer
-                    lat_buffer = (max_lat - min_lat) * 0.05
-                    lon_buffer = (max_lon - min_lon) * 0.05
+                      # Adicionar um pequeno buffer
+                      lat_buffer = (max_lat - min_lat) * 0.05
+                      lon_buffer = (max_lon - min_lon) * 0.05
 
-                    center_lat = (max_lat + min_lat) / 2
-                    center_lon = (max_lon + min_lon) / 2
+                      center_lat = (max_lat + min_lat) / 2
+                      center_lon = (max_lon + min_lon) / 2
 
-                    # Determinar um zoom inicial razoável baseado nos bounds
-                    # Pode ser necessário ajustar esta lógica dependendo da escala das suas rotas
-                    zoom = 12 # Valor padrão
+                      # Determinar um zoom inicial razoável baseado nos bounds (heurística simples)
+                      # Calcula a extensão longitudinal e ajusta o zoom
+                      lon_extent = max_lon - min_lon
+                      lat_extent = max_lat - min_lat
+                      # Fórmula de zoom aproximada (ajuste conforme necessário)
+                      if lon_extent > 0 and lat_extent > 0:
+                         zoom_lon = 360 / lon_extent
+                         zoom_lat = 180 / lat_extent
+                         zoom = min(zoom_lon, zoom_lat) * 0.5 # Ajuste o fator (0.5)
+                         zoom = min(max(zoom, 10), 15) # Limita o zoom entre 10 e 15
+                      else:
+                         zoom = 12 # Zoom padrão se a rota for muito pequena ou um ponto
 
-                    fig = go.Figure(go.Scattermapbox(
-                        mode="lines+markers",
-                        lon=route_coords['longitude'],
-                        lat=route_coords['latitude'],
-                        # CORRIGIDO: Use o valor hexadecimal da variável --accent-color
-                        marker={'size': 8, 'color': ACCENT_COLOR},
-                        # CORRIGIDO: Use o valor hexadecimal da variável --primary-color
-                        line=dict(width=4, color=PRIMARY_COLOR),
-                        hovertext=[f"Ponto {i+1}" for i in range(len(route_coords))],
-                        hoverinfo="text+lat+lon"
-                    ))
+                      fig = go.Figure(go.Scattermapbox(
+                          mode="lines+markers",
+                          lon=route_coords['longitude'],
+                          lat=route_coords['latitude'],
+                          marker={'size': 8, 'color': ACCENT_COLOR},
+                          line=dict(width=4, color=PRIMARY_COLOR),
+                          hovertext=[f"Ponto {i+1}" for i in range(len(route_coords))],
+                          hoverinfo="text+lat+lon" # Mostra texto customizado + lat/lon no tooltip
+                      ))
 
-                    fig.update_layout(
-                        mapbox={
-                            'style': "carto-darkmatter", # Estilo de mapa que combina com o tema escuro
-                            'center': {'lat': center_lat, 'lon': center_lon},
-                            'zoom': zoom,
-                             # Bounds podem ajudar a focar na área, mas 'center' e 'zoom' são mais comuns
-                             'bounds': {'west': min_lon - lon_buffer, 'east': max_lon + lon_buffer,
-                                        'south': min_lat - lat_buffer, 'north': max_lat + lat_buffer}
-                        },
-                        margin={"r":0,"t":0,"l":0,"b":0},
-                        height=500, # Altura do mapa
-                        # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
-                        plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                        # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
-                        paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                        # CORRIGIDO: Use o valor hexadecimal da variável --text-color
-                        font=dict(color=TEXT_COLOR)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.warning(f"Nenhuma coordenada geográfica encontrada para a rota '{route}'.")
-        elif route in routes_info and 'error' in routes_info[route]:
-             st.warning(f"Mapa não disponível para '{route}' devido a erro no carregamento de dados.")
+                      fig.update_layout(
+                          mapbox={
+                              'style': "carto-darkmatter", # Estilo de mapa que combina com o tema escuro
+                              'center': {'lat': center_lat, 'lon': center_lon},
+                              'zoom': zoom,
+                              # bounds podem ser usados para focar na área
+                              'bounds': {'west': min_lon - lon_buffer, 'east': max_lon + lon_buffer,
+                                         'south': min_lat - lat_buffer, 'north': max_lat + lat_buffer}
+                          },
+                          margin={"r":0,"t":0,"l":0,"b":0},
+                          height=500, # Altura do mapa
+                          plot_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do plot
+                          paper_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do papel (figura)
+                          font=dict(color=TEXT_COLOR), # Cor da fonte global do gráfico
+                          title=f"Mapa da Rota: {route}" # Adiciona título ao mapa
+                      )
+                      st.plotly_chart(fig, use_container_width=True)
+                  else:
+                      st.warning(f"Nenhuma coordenada geográfica encontrada para a rota '{route}'. Não é possível exibir o mapa.")
+         elif route in routes_info and 'error' in routes_info[route]:
+              st.warning(f"Mapa não disponível para '{route}' devido a erro no carregamento de dados.")
+         else:
+             # Isso pode acontecer se compare_enabled for True mas a segunda rota não puder ser carregada
+             st.info(f"Dados insuficientes para exibir o mapa da rota '{route}'.")
 
 
     # --- Seção de Análise ---
     st.header("📈 Análise Preditiva")
     for route in routes_to_process:
+        # Verifica se a rota foi carregada com sucesso e tem dados processados
         if route in routes_info and not routes_info[route]['data'].empty:
             processed_df = routes_info[route]['data']
             route_id = routes_info[route]['id']
 
+            # Expander para cada rota
             with st.expander(f"Análise para {route}", expanded=True):
 
                 st.subheader("🧠 Insights Automáticos")
@@ -745,7 +806,9 @@ def main():
 
                 st.subheader("📉 Decomposição Temporal")
                 # Passa o df processado que clean_data retornou
+                # Esta função usa Matplotlib, a cor do tema é configurada DENTRO dela.
                 seasonal_decomposition_plot(processed_df)
+
 
                 st.subheader("🔥 Heatmap Horário por Dia da Semana")
                 if not processed_df.empty:
@@ -756,152 +819,124 @@ def main():
                         aggfunc='mean'
                     )
 
-                    # Reordenar dias da semana (em português se preferir, mas mantive inglês para o código)
+                    # Reordenar dias da semana (em português)
                     dias_ordenados_eng = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-                    # Mapeamento para português se quiser exibir no gráfico
                     dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
                     dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
 
                     # Reindexar a tabela pivotada
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
-                    pivot_table.index = pivot_table.index.map(dia_mapping) # Renomear índice para português
+                    # Renomear índice para português apenas para exibição no gráfico
+                    pivot_table.index = pivot_table.index.map(dia_mapping)
 
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    # Usar cmap que funcione bem em fundo escuro
-                    sns.heatmap(pivot_table, annot=True, fmt=".1f", cmap="viridis", ax=ax) # 'viridis' ou 'plasma' ou 'cividis'
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_title("Velocidade Média por Dia da Semana e Hora", color=TEXT_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_xlabel("Hora do Dia", color=TEXT_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_ylabel("Dia da Semana", color=TEXT_COLOR)
-                    # Ajustar cor dos ticks e labels
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.tick_params(axis='x', colors=TEXT_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.tick_params(axis='y', colors=TEXT_COLOR)
-                    # Mudar cor do background do plot
-                    # CORRIGIDO: Usar a cor do tema
-                    fig.patch.set_facecolor(SECONDARY_BACKGROUND_COLOR)
-                    # CORRIGIDO: Usar a cor do tema
-                    ax.set_facecolor(SECONDARY_BACKGROUND_COLOR)
-                    st.pyplot(fig)
+                    # --- Plotly Heatmap Code (Substitui o Seaborn/Matplotlib aqui) ---
+                    fig_heatmap = px.heatmap(
+                        pivot_table,
+                        text_auto=".1f", # Mostra o valor dentro da célula (opcional)
+                        aspect="auto",
+                        title="Velocidade Média por Dia da Semana e Hora",
+                        color_continuous_scale="Viridis" # Use o mesmo cmap ou similar ao viridis
+                    )
+
+                    # Configurar layout para combinar com o tema (cores, fontes)
+                    fig_heatmap.update_layout(
+                        title_font_color=TEXT_COLOR,
+                        xaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Hora do Dia", title_font_color=TEXT_COLOR),
+                        yaxis=dict(tickfont=dict(color=TEXT_COLOR), title="Dia da Semana", title_font_color=TEXT_COLOR),
+                        plot_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do plot
+                        paper_bgcolor=SECONDARY_BACKGROUND_COLOR, # Fundo do papel (figura)
+                        font=dict(color=TEXT_COLOR) # Cor da fonte global do gráfico
+                    )
+                    # Configurar cor do texto dos valores dentro do heatmap (se text_auto for True)
+                    # Pode ser tricky com plotly express text_auto, pode precisar ajustar cores do template global ou adicionar manualmente
+                    # Por enquanto, confiamos que o plotly escolhe uma cor visível automaticamente.
+
+                    # Exibe o gráfico Plotly no Streamlit
+                    # O tooltip com o valor aparece por padrão ao passar o mouse com px.heatmap
+                    st.plotly_chart(fig_heatmap, use_container_width=True)
+
                 else:
-                     st.info("Dados insuficientes para gerar o Heatmap.")
+                    st.info("Dados insuficientes para gerar o Heatmap.")
 
 
-                st.subheader("🔮 Previsão de Velocidade (Modelo ARIMA)")
-                # Certificar que o DataFrame tem dados e foi limpo
-                if not processed_df.empty:
-                     # A frequência da série temporal é 3 minutos, baseada na coleta
-                     # O key do slider precisa ser único por rota
-                     steps = st.slider(f"⏱️ Passos de previsão para '{route}' (3min cada)", 5, 60, 10, key=f"steps_{route}")
+                st.subheader("🔮 Previsão de Velocidade (ARIMA)")
+                # Adicionar controle para o número de passos da previsão
+                forecast_steps = st.slider(f"Quantos pontos futuros prever (rota: {route})?", min_value=1, max_value=48 * (60//3), value=48 * (60//3)//2, step=(60//3), key=f"forecast_steps_{route}") # Prever até 48 horas em passos de 3min
 
-                     # Criar previsão (cached)
-                     arima_forecast = create_arima_forecast(processed_df, route_id, steps)
+                # Botão para rodar a previsão
+                if st.button(f"Gerar Previsão para {route}", key=f"generate_forecast_{route}"):
+                     forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps)
 
-                     if not arima_forecast.empty:
-                         fig = go.Figure()
+                     if not forecast_df.empty:
+                         st.success(f"Previsão gerada para os próximos {forecast_steps * 3} minutos.")
 
-                         # Adicionar dados históricos
-                         fig.add_trace(go.Scatter(
+                         # Visualizar a previsão
+                         fig_forecast = go.Figure()
+
+                         # Adiciona os dados históricos
+                         fig_forecast.add_trace(go.Scatter(
                              x=processed_df['data'],
                              y=processed_df['velocidade'],
                              mode='lines',
                              name='Histórico',
-                             # CORRIGIDO: Use o valor hexadecimal da variável --primary-color
-                             line=dict(color=PRIMARY_COLOR, width=2)
+                             line=dict(color=TEXT_COLOR, width=2) # Cor para o histórico
                          ))
 
-                         # Adicionar previsão
-                         fig.add_trace(go.Scatter(
-                             x=arima_forecast['ds'],
-                             y=arima_forecast['yhat'],
+                         # Adiciona a previsão
+                         fig_forecast.add_trace(go.Scatter(
+                             x=forecast_df['ds'],
+                             y=forecast_df['yhat'],
                              mode='lines',
                              name='Previsão',
-                             # CORRIGIDO: Use o valor hexadecimal da variável --accent-color
-                             line=dict(color=ACCENT_COLOR, width=2, dash='dash')
+                             line=dict(color=PRIMARY_COLOR, width=3) # Cor primária para a previsão
                          ))
 
-                         # Adicionar intervalo de confiança
-                         # Usando a cor baseada no primary color com transparência
-                         fill_color_rgba = f'rgba({int(PRIMARY_COLOR[1:3], 16)}, {int(PRIMARY_COLOR[3:5], 16)}, {int(PRIMARY_COLOR[5:7], 16)}, 0.2)'
-
-                         fig.add_trace(go.Scatter(
-                             x=arima_forecast['ds'].tolist() + arima_forecast['ds'][::-1].tolist(), # Datas para preencher a área
-                             y=arima_forecast['yhat_upper'].tolist() + arima_forecast['yhat_lower'][::-1].tolist(), # Limites para preencher a área
-                             fill='toself',
-                             # CORRIGIDO: Use a cor RGBA baseada no tema
-                             fillcolor=fill_color_rgba,
-                             line=dict(color='rgba(255,255,255,0)'), # Linha transparente
-                             name='Intervalo de Confiança (95%)',
-                             showlegend=True
+                         # Adiciona o intervalo de confiança
+                         fig_forecast.add_trace(go.Scatter(
+                             x=pd.concat([forecast_df['ds'], forecast_df['ds'][::-1]]), # Datas para o polígono (ida e volta)
+                             y=pd.concat([forecast_df['yhat_upper'], forecast_df['yhat_lower'][::-1]]), # Limites (superior e inferior invertido)
+                             fill='toself', # Preenche a área entre as duas linhas
+                             fillcolor='rgba(0, 175, 255, 0.2)', # Cor semi-transparente (similar ao PRIMARY_COLOR)
+                             line=dict(color='rgba(255,255,255,0)'), # Linha invisível
+                             name='Intervalo de Confiança 95%'
                          ))
 
-                         fig.update_layout(
-                             title=f"Histórico e Previsão para {route}",
-                             xaxis_title="Data e Hora",
+                         # Configura o layout do gráfico de previsão
+                         fig_forecast.update_layout(
+                             title=f'Previsão de Velocidade para {route}',
+                             xaxis_title="Data/Hora",
                              yaxis_title="Velocidade (km/h)",
-                             hovermode='x unified', # Melhorar hover
-                             # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
+                             hovermode='x unified', # Agrupa tooltips por eixo X
                              plot_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                             # CORRIGIDO: Use o valor hexadecimal da variável --secondary-background-color
                              paper_bgcolor=SECONDARY_BACKGROUND_COLOR,
-                             # CORRIGIDO: Use o valor hexadecimal da variável --text-color
                              font=dict(color=TEXT_COLOR),
-                             # Manter as cores do grid em cinza, combinam com o tema escuro
-                             xaxis=dict(showgrid=True, gridcolor='#555'),
-                             yaxis=dict(showgrid=True, gridcolor='#555'),
-                             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1) # Posicionar legenda
+                             title_font_color=TEXT_COLOR,
+                             xaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
+                             yaxis=dict(tickfont=dict(color=TEXT_COLOR), title_font_color=TEXT_COLOR),
+                             legend=dict(font=dict(color=TEXT_COLOR))
                          )
-                         st.plotly_chart(fig)
 
-                         # Botão para salvar a previsão (key precisa ser única por rota)
-                         if st.button(f"💾 Salvar Última Previsão para '{route}'", key=f"save_forecast_{route}"):
-                              save_forecast_to_db(arima_forecast)
+                         st.plotly_chart(fig_forecast, use_container_width=True)
 
+                         # Botão para salvar a previsão no banco de dados
+                         if st.button(f"Salvar Previsão no Banco de Dados para {route}", key=f"save_forecast_{route}"):
+                              save_forecast_to_db(forecast_df)
                      else:
-                         st.info("Não foi possível gerar a previsão para esta rota e período. Verifique se há dados históricos suficientes.")
-                else:
-                     st.info("Dados insuficientes para rodar a análise de previsão para esta rota e período.")
+                         st.info("Previsão não gerada. Verifique os dados ou o período selecionado.")
 
-        elif route in routes_info and 'error' in routes_info[route]:
-             st.warning(f"Análise preditiva não disponível para '{route}' devido a erro no carregamento de dados.")
+                elif f"generate_forecast_{route}" not in st.session_state:
+                    # Mensagem inicial antes de gerar a previsão
+                    st.info("Clique no botão acima para gerar a previsão de velocidade para esta rota.")
+
+        # Adiciona uma linha separadora entre as análises de rotas se houver mais de uma
+        if len(routes_to_process) > 1 and routes_to_process.index(route) < len(routes_to_process) - 1:
+            st.markdown("---") # Linha horizontal
+
+    # Mensagem final caso nenhuma rota tenha dados
+    if not routes_info or all(info['data'].empty for info in routes_info.values()):
+         st.info("Nenhuma análise exibida. Selecione rotas com dados disponíveis.")
 
 
-    # --- Seção Técnica ---
-    st.header("⚙️ Detalhes Técnicos")
-    with st.expander("Relatório de Qualidade de Dados"):
-        for route in routes_to_process:
-            # Verificar se a rota foi processada e não teve erro de carga fatal
-            if route in routes_info and 'error' not in routes_info[route]:
-                st.subheader(f"Qualidade dos Dados: {route}")
-                processed_df = routes_info[route]['data']
-
-                if not processed_df.empty:
-                    report = {
-                        "total_registros_carregados_periodo": len(processed_df),
-                        "registros_velocidade_nulos_apos_limpeza": processed_df['velocidade'].isnull().sum(), # Deve ser 0 se o ffill/bfill funcionou
-                        # anomaly detection needs to be implemented and used if desired in the report
-                        # "outliers_detectados": len(detect_anomalies(processed_df)), # Usar se a detecção de anomalias for usada
-                        "cobertura_temporal": f"{processed_df['data'].min().strftime('%Y-%m-%d %H:%M')} a {processed_df['data'].max().strftime('%Y-%m-%d %H:%M')}" if not processed_df.empty else "N/A"
-                    }
-                    st.json(report)
-                else:
-                     st.info(f"Não há dados processados para gerar relatório de qualidade para '{route}'.")
-            elif route in routes_info and 'error' in routes_info[route]:
-                 st.warning(f"Relatório de qualidade não disponível para '{route}' devido a erro no carregamento de dados: {routes_info[route]['error']}")
-            else:
-                 st.info(f"Dados para '{route}' não foram carregados ou processados.")
-
-                 # Exemplo de integração de alertas
-                 ALERT_RULES = {
-                    "congestion": {
-                        "condition": lambda df: df['velocidade'].rolling(4).mean() < 20,
-                        "duration": "15min",
-                        "message": "Congestionamento formando na rota {}"
-                    }
-                }
-
+# --- Executa o aplicativo Streamlit ---
 if __name__ == "__main__":
     main()
