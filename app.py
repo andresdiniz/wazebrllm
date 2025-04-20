@@ -129,7 +129,7 @@ h1, h2, h3, h4, h5, h6 {{
     color: var(--text-color);
     background-color: var(--secondary-background-color);
     border: 1px solid #555; /* Borda sutil */
-    border-radius: 4px; /* CORREÇÃO: 'cuarta' não é válido, deve ser '4px' ou similar */
+    border-radius: 4px;
     padding: 5px;
 }}
 
@@ -845,17 +845,20 @@ def main():
                         pivot_table_reset['Dia da Semana'], categories=dias_pt, ordered=True
                     )
                     # Opcional: Reordenar o dataframe pelo dia da semana categórico (útil para depuração, mas o Plotly geralmente respeita a ordem categórica)
-                    pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
+                    # Removido a reordenação explícita aqui para simplificar, a categoria já deve bastar.
+                    # pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
 
 
                     # Obter a lista de colunas de hora (todas as colunas exceto 'Dia da Semana')
                     # Estes são os nomes das colunas numéricas 0, 1, 2, ...
                     hour_columns = [col for col in pivot_table_reset.columns if col != 'Dia da Semana']
 
-                    # --- DIAGNÓSTICO (Descomente se o erro persistir) ---
-                    # st.write("DEBUG: Colunas de pivot_table_reset:", pivot_table_reset.columns.tolist())
-                    # st.write("DEBUG: id_vars passado para melt:", ['Dia da Semana'])
-                    # st.write("DEBUG: value_vars (hour_columns) passado para melt:", hour_columns)
+                    # --- DIAGNÓSTICO FINAL ANTES DO MELT (Opcional) ---
+                    # st.write("DEBUG (Before Melt): pivot_table_reset columns:", pivot_table_reset.columns.tolist())
+                    # st.write("DEBUG (Before Melt): pivot_table_reset dtypes:", pivot_table_reset.dtypes)
+                    # st.write("DEBUG (Before Melt): pivot_table_reset head():", pivot_table_reset.head())
+                    # st.write("DEBUG (Before Melt): id_vars for melt:", ['Dia da Semana'])
+                    # st.write("DEBUG (Before Melt): value_vars (hour_columns) for melt:", hour_columns)
                     # --- FIM DIAGNÓSTICO ---
 
 
@@ -871,9 +874,18 @@ def main():
                     # Garantir que a coluna de hora seja numérica (Plotly gosta disso para eixos numéricos)
                     melted_heatmap_data['Hora do Dia'] = pd.to_numeric(melted_heatmap_data['Hora do Dia'])
 
+                    # --- DIAGNÓSTICO FINAL ANTES DO HEATMAP ---
+                    st.write("DEBUG (Heatmap Data): melted_heatmap_data columns:", melted_heatmap_data.columns.tolist())
+                    st.write("DEBUG (Heatmap Data): melted_heatmap_data dtypes:", melted_heatmap_data.dtypes)
+                    st.write("DEBUG (Heatmap Data): melted_heatmap_data head():", melted_heatmap_data.head())
+                    # st.write("DEBUG (Heatmap Data): melted_heatmap_data describe():", melted_heatmap_data.describe()) # Descomente se precisar de estatísticas
+                    st.write("DEBUG (Heatmap Data): melted_heatmap_data isnull().sum():", melted_heatmap_data.isnull().sum())
+                    # --- FIM DIAGNÓSTICO FINAL ---
+
+
                     # --- Plotly Heatmap Code usando dados derretidos ---
                     # Agora especificamos explicitamente x, y, e z
-                    # ESTA É A LINHA QUE ESTÁ CAUSANDO O ATTRIBUTEERROR
+                    # ESTA É A LINHA QUE ESTÁ CAUSANDO O ATTRIBUTEERROR (line 877)
                     fig_heatmap = px.heatmap(
                         melted_heatmap_data, # Passa o DataFrame derretido
                         x='Hora do Dia',     # Nome da coluna para o eixo X
