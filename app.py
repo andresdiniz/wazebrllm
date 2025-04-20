@@ -266,7 +266,7 @@ def get_data(start_date=None, end_date=None, route_name=None):
         if mycursor:
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
-        
+
 # Carregar apenas nomes das rotas (cached)
 @st.cache_data # Usar cache_data para dados estáticos como nomes de rotas
 def get_all_route_names():
@@ -915,7 +915,7 @@ def main():
                     sns.heatmap(
                         pivot_table,
                         annot=True,      # Mostrar os valores nas células
-                        fmt=".2f",       # Formatar os valores para 2 casas decimais
+                        fmt=".0f",       # Formatar os valores para 2 casas decimais
                         cmap="viridis",  # Mapa de cores (similar ao Viridis do Plotly)
                         linewidths=.5,   # Adicionar linhas entre as células para clareza
                         ax=ax_mpl        # Desenhar no eixo Matplotlib criado
