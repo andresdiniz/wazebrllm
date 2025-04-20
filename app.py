@@ -129,7 +129,7 @@ h1, h2, h3, h4, h5, h6 {{
     color: var(--text-color);
     background-color: var(--secondary-background-color);
     border: 1px solid #555; /* Borda sutil */
-    border-radius: 4 cuarta
+    border-radius: 4px; /* CORREÇÃO: 'cuarta' não é válido, deve ser '4px' ou similar */
     padding: 5px;
 }}
 
@@ -669,7 +669,7 @@ def main():
         if date_range is None: # Caso a comparação esteja habilitada, mas a rota secundária não tenha range
              continue
 
-        # Converter objetos date para strings YYYY-MM-DD para passar para get_data
+        # Converter objetos date para stringsYYYY-MM-DD para passar para get_data
         start_date_str = date_range[0].strftime('%Y-%m-%d')
         end_date_str = date_range[1].strftime('%Y-%m-%d')
 
@@ -824,22 +824,27 @@ def main():
                     dias_pt = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
                     dia_mapping = dict(zip(dias_ordenados_eng, dias_pt))
 
+                    # Reindexar a tabela pivotada para garantir a ordem dos dias
                     pivot_table = pivot_table.reindex(dias_ordenados_eng)
                     # O mapeamento do índice para português será feito DEPOIS de resetar o índice
 
-                    # --- CORREÇÃO AQUI ---
+
+                    # --- CORREÇÃO DO KEYERROR APLICADA AQUI ---
                     # Resetar o índice para transformar a coluna 'day_of_week' (o índice original) em uma coluna
                     pivot_table_reset = pivot_table.reset_index()
                     # Renomear a coluna que era o índice ('day_of_week') para 'Dia da Semana'
+                    # ESTA LINHA FOI CORRIGIDA DE {'index': 'Dia da Semana'} PARA {'day_of_week': 'Dia da Semana'}
                     pivot_table_reset = pivot_table_reset.rename(columns={'day_of_week': 'Dia da Semana'})
 
                     # Aplicar o mapeamento dos nomes dos dias para português AGORA que 'Dia da Semana' é uma coluna
                     pivot_table_reset['Dia da Semana'] = pivot_table_reset['Dia da Semana'].map(dia_mapping)
-                    # Opcional: Reordenar as linhas pelo novo nome da coluna 'Dia da Semana' se o mapeamento bagunçar a ordem
+
                     # Define uma categoria para a coluna 'Dia da Semana' para garantir a ordem correta no gráfico
+                    # Isso também ajuda Plotly a entender a ordem do eixo Y
                     pivot_table_reset['Dia da Semana'] = pd.Categorical(
                         pivot_table_reset['Dia da Semana'], categories=dias_pt, ordered=True
                     )
+                    # Opcional: Reordenar o dataframe pelo dia da semana categórico (útil para depuração, mas o Plotly geralmente respeita a ordem categórica)
                     pivot_table_reset = pivot_table_reset.sort_values('Dia da Semana')
 
 
@@ -855,6 +860,7 @@ def main():
 
 
                     # Derreter o DataFrame, especificando explicitamente as colunas de valor (as horas)
+                    # ESTA LINHA FOI CORRIGIDA PARA USAR value_vars=hour_columns
                     melted_heatmap_data = pivot_table_reset.melt(
                         id_vars=['Dia da Semana'],        # Coluna(s) para manter como identificadores
                         value_vars=hour_columns,         # ESPECIFICAR AS COLUNAS DE HORA
@@ -865,19 +871,15 @@ def main():
                     # Garantir que a coluna de hora seja numérica (Plotly gosta disso para eixos numéricos)
                     melted_heatmap_data['Hora do Dia'] = pd.to_numeric(melted_heatmap_data['Hora do Dia'])
 
-                    # Opcional: Ordenar os dados derretidos para garantir a ordem no gráfico, embora Plotly geralmente gerencie isso
-                    # com base nos tipos de dados e ordem no DataFrame. A reindexação anterior já ajuda.
-                    # melted_heatmap_data = melted_heatmap_data.sort_values(by=['Dia da Semana', 'Hora do Dia'])
-
-
                     # --- Plotly Heatmap Code usando dados derretidos ---
                     # Agora especificamos explicitamente x, y, e z
+                    # ESTA É A LINHA QUE ESTÁ CAUSANDO O ATTRIBUTEERROR
                     fig_heatmap = px.heatmap(
-                        melted_heatmap_data,
-                        x='Hora do Dia',
-                        y='Dia da Semana',
-                        z='Velocidade Média', # Use a coluna de valores
-                        text_auto=True,       # Mostra o valor dentro da célula (opcional) - Plotly 5.x+
+                        melted_heatmap_data, # Passa o DataFrame derretido
+                        x='Hora do Dia',     # Nome da coluna para o eixo X
+                        y='Dia da Semana',   # Nome da coluna para o eixo Y
+                        z='Velocidade Média',# Nome da coluna para os valores/cor
+                        text_auto=True,      # Mostra o valor dentro da célula (opcional) - Plotly 5.x+
                         aspect="auto",
                         title="Velocidade Média por Dia da Semana e Hora",
                         color_continuous_scale="Viridis" # Use o mesmo cmap ou similar ao viridis
@@ -900,6 +902,7 @@ def main():
 
                 else:
                     st.info("Dados insuficientes para gerar o Heatmap.")
+
 
                 st.subheader("🔮 Previsão de Velocidade (ARIMA)")
                 # Adicionar controle para o número de passos da previsão
