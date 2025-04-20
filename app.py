@@ -263,7 +263,6 @@ def get_db_connection():
         st.error(f"Erro ao conectar ao banco de dados: {e}")
         st.stop() # Parar a execução se não conseguir conectar
 
-@st.cache_data # Usar cache_data para os dados históricos, dependendo dos parâmetros
 def get_data(start_date=None, end_date=None, route_name=None):
     """
     Busca dados históricos de velocidade do banco de dados para uma rota e período específicos.
@@ -327,7 +326,6 @@ def get_data(start_date=None, end_date=None, route_name=None):
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-@st.cache_data # Usar cache_data para dados estáticos como nomes de rotas
 def get_all_route_names():
     """
     Busca todos os nomes de rotas distintos no banco de dados.
@@ -354,7 +352,6 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-@st.cache_data # Usar cache_data para coordenadas de rota
 def get_route_coordinates(route_id):
     """
     Busca as coordenadas geográficas (linha) para uma rota específica.
