@@ -657,7 +657,7 @@ def gerar_insights(df):
             # Mapeamento para português e ordenação
             dias_pt_map = {
                 'Monday': 'Segunda-feira', 'Tuesday': 'Terça-feira', 'Wednesday': 'Quarta-feira',
-                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Domingo'
+                'Thursday': 'Quinta-feira', 'Friday': 'Sexta-feira', 'Saturday': 'Sábado', 'Domingo': 'Sunday'
             }
             weekday_avg_pt = weekday_avg.rename(index=dias_pt_map)
             dias_ordenados_pt = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo']
