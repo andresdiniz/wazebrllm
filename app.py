@@ -885,7 +885,7 @@ def main():
 
                     # --- Plotly Heatmap Code usando dados derretidos ---
                     # Agora especificamos explicitamente x, y, e z
-                    # ESTA É A LINHA QUE ESTÁ CAUSANDO O ATTRIBUTEERROR (line 877)
+                    # ESTA É A LINHA QUE ESTÁ CAUSANDO O ATTRIBUTEERROR (line 889)
                     fig_heatmap = px.heatmap(
                         melted_heatmap_data, # Passa o DataFrame derretido
                         x='Hora do Dia',     # Nome da coluna para o eixo X
