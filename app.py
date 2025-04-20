@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.tsa.seasonal import seasonal_decompose
-import plotly as px
+import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
 import mysql.connector
