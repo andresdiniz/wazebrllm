@@ -937,15 +937,14 @@ def main():
                     # --- Remover linha de debug do colorbar ---
                     # st.write("DEBUG: Configuração de colorbar sendo passada:", colorbar_config)
 
+                    # Trecho modificado do Heatmap
                     fig_heatmap = go.Figure(go.Heatmap(
-                        x=x_data, # Horas
-                        y=y_data, # Dias da Semana
-                        z=z_data, # Valores de velocidade média
-                        colorscale="Viridis", # Use o mesmo cmap
-                        colorbar=colorbar_config, # Usando a configuração completa
-                        hoverinfo="x+y+z", # Mostra hora, dia e valor no hover
-                        texttemplate="%{z:.0f}", # Formata o texto nas células como inteiros
-                        textfont={"size":10, "color": TEXT_COLOR} # Fonte para o texto nas células
+                        x=x_data,  # Horas
+                        y=y_data,  # Dias da Semana
+                        z=z_data,  # Valores de velocidade
+                        colorscale="Viridis",
+                        hoverinfo="x+y+z",
+                        texttemplate="%{z:.0f}"
                     ))
 
                     # Configurar layout para combinar com o tema (cores, fontes)
