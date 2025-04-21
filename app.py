@@ -745,8 +745,7 @@ def get_route_metadata():
                 avg_speed,
                 avg_time,
                 historic_speed,
-                historic_time,
-                is_active
+                historic_time
             FROM routes
         """
         
@@ -1096,7 +1095,7 @@ def main():
                       else:
                          zoom = 12 # Zoom padrão se a rota for muito pequena ou um ponto
 
-                      fig = go.Figure(go.Scattermap(
+                      fig = go.Figure(go.Scattermapbox(
                           mode="lines+markers",
                           lon=route_coords['longitude'],
                           lat=route_coords['latitude'],
