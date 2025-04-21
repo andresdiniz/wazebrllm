@@ -726,60 +726,33 @@ def gerar_insights(df):
 
 def get_route_metadata():
     """
-    Busca metadados completos das rotas incluindo dados históricos e atuais.
-    Retorna DataFrame com colunas:
-    [id, name, jam_level, avg_speed, avg_time, historic_speed, historic_time]
+    Busca metadados das rotas de acordo com o schema fornecido
     """
     mydb = None
     mycursor = None
     try:
         logging.info("Iniciando busca de metadados das rotas...")
         
-        # Verificar conexão
-        try:
-            mydb = get_db_connection()
-            if mydb.is_connected():
-                logging.info("Conexão com banco estabelecida")
-            else:
-                logging.error("Falha na conexão com o banco")
-                return pd.DataFrame()
-        except Exception as conn_err:
-            logging.error(f"Erro de conexão: {str(conn_err)}")
-            return pd.DataFrame()
-
-        mycursor = mydb.cursor(dictionary=True)
+        mydb = get_db_connection()
+        mycursor = mydb.cursor(dictionary=True)  # Usar cursor dicionário
         
-        # Verificar existência da tabela
-        mycursor.execute("SHOW TABLES LIKE 'routes'")
-        if not mycursor.fetchone():
-            logging.error("Tabela 'routes' não existe")
-            return pd.DataFrame()
-            
-        # Verificar existência da coluna is_active
-        mycursor.execute("""
-            SELECT COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_NAME = 'routes' 
-            AND COLUMN_NAME = 'is_active'
-        """)
-        if not mycursor.fetchone():
-            logging.error("Coluna 'is_active' não existe na tabela routes")
-            return pd.DataFrame()
-
         query = """
             SELECT 
-                id, name, jam_level, 
-                avg_speed, avg_time,
-                historic_speed, historic_time 
+                id,
+                name,
+                jam_level,
+                avg_speed,
+                avg_time,
+                historic_speed,
+                historic_time,
+                is_active
             FROM routes
             WHERE is_active = 1
         """
         
-        logging.debug(f"Executando query: {query}")
         start_time = time.time()
         mycursor.execute(query)
         
-        # Verificar resultados
         results = mycursor.fetchall()
         if not results:
             logging.warning("Nenhuma rota ativa encontrada")
@@ -787,25 +760,27 @@ def get_route_metadata():
             
         df = pd.DataFrame(results)
         
-        # Verificar colunas obrigatórias
-        required_columns = {
-            'avg_speed': 'float64',
-            'avg_time': 'int64',
-            'historic_speed': 'float64',
-            'historic_time': 'int64'
+        # Converter tipos de dados explicitamente
+        conversions = {
+            'avg_speed': 'float32',
+            'avg_time': 'int32',
+            'historic_speed': 'float32',
+            'historic_time': 'int32',
+            'is_active': 'bool'
         }
         
-        for col, dtype in required_columns.items():
-            if col not in df.columns:
-                logging.error(f"Coluna obrigatória ausente: {col}")
-                return pd.DataFrame()
-            try:
-                df[col] = df[col].astype(dtype)
-            except Exception as e:
-                logging.error(f"Erro na conversão da coluna {col}: {str(e)}")
-                return pd.DataFrame()
+        for col, dtype in conversions.items():
+            if col in df.columns:
+                try:
+                    df[col] = df[col].astype(dtype)
+                except Exception as e:
+                    logging.error(f"Erro na conversão de {col}: {str(e)}")
+                    df[col] = None
         
-        logging.info(f"Metadados carregados: {len(df)} rotas ativas")
+        # Filtrar novamente após conversão
+        df = df[df['is_active'] == True]
+        
+        logging.info(f"Carregadas {len(df)} rotas ativas")
         return df
 
     except mysql.connector.Error as err:
@@ -1121,7 +1096,7 @@ def main():
                       else:
                          zoom = 12 # Zoom padrão se a rota for muito pequena ou um ponto
 
-                      fig = go.Figure(go.Scattermapbox(
+                      fig = go.Figure(go.Scattermap(
                           mode="lines+markers",
                           lon=route_coords['longitude'],
                           lat=route_coords['latitude'],
@@ -1164,27 +1139,21 @@ def main():
             
             if route_metadata.empty:
                 st.error("""
-                ⚠️ Falha ao carregar metadados. Verifique:
-                1. Conexão com o banco de dados
-                2. Existência da tabela 'routes'
-                3. Colunas obrigatórias na tabela:
+                ⚠️ Nenhuma rota ativa encontrada. Verifique:
+                1. Coluna 'is_active' com valor 1
+                2. Dados nas colunas numéricas:
                    - avg_speed
                    - avg_time  
                    - historic_speed
                    - historic_time
-                   - is_active
-                4. Registros com 'is_active = 1'
                 """)
-                logging.error("Metadados vazios - verificar estrutura do banco")
                 st.stop()
                 
-            analysis_df = analyze_current_vs_historical(route_metadata)
-            
             # Restante da análise...
             
     except Exception as e:
         st.error(f"Erro crítico: {str(e)}")
-        logging.critical(f"Falha na análise principal: {str(e)}", exc_info=True)
+        logging.critical(f"Falha na análise: {str(e)}", exc_info=True)
         st.stop()
 
         
