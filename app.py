@@ -727,12 +727,21 @@ def gerar_insights(df):
 def get_route_metadata():
     """
     Busca metadados completos das rotas incluindo dados históricos e atuais.
+    Retorna DataFrame com colunas:
+    [id, name, jam_level, avg_speed, avg_time, historic_speed, historic_time]
     """
     mydb = None
     mycursor = None
     try:
+        logging.info("Iniciando busca de metadados das rotas...")
+        
         mydb = get_db_connection()
+        if mydb is None:
+            logging.error("Falha na conexão com o banco de dados")
+            return pd.DataFrame()
+            
         mycursor = mydb.cursor()
+        
         query = """
             SELECT 
                 id, name, jam_level, 
@@ -741,14 +750,59 @@ def get_route_metadata():
             FROM routes
             WHERE is_active = 1
         """
+        logging.debug(f"Executando query: {query}")
+        
+        start_time = time.time()
         mycursor.execute(query)
+        execution_time = time.time() - start_time
+        logging.info(f"Query executada com sucesso em {execution_time:.2f}s")
+        
         results = mycursor.fetchall()
+        logging.info(f"Total de registros encontrados: {len(results)}")
+        
+        if not results:
+            logging.warning("Nenhum registro encontrado na tabela routes")
+            return pd.DataFrame()
+            
         col_names = [desc[0] for desc in mycursor.description]
         df = pd.DataFrame(results, columns=col_names)
+        
+        # Verificar colunas essenciais
+        required_columns = ['avg_speed', 'avg_time', 'historic_speed', 'historic_time']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            logging.error(f"Colunas obrigatórias ausentes: {missing_columns}")
+            return pd.DataFrame()
+            
+        # Converter tipos de dados
+        try:
+            numeric_cols = ['avg_speed', 'avg_time', 'historic_speed', 'historic_time']
+            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
+        except Exception as e:
+            logging.error(f"Erro na conversão numérica: {str(e)}")
+            return pd.DataFrame()
+            
+        logging.info("Metadados processados com sucesso")
         return df
-    except Exception as e:
-        logging.exception("Erro ao obter metadados das rotas:")
+        
+    except mysql.connector.Error as err:
+        logging.error(f"Erro MySQL [{err.errno}]: {err.msg}")
+        logging.debug(f"SQL State: {err.sqlstate}", exc_info=True)
         return pd.DataFrame()
+    except Exception as e:
+        logging.error(f"Erro inesperado: {str(e)}", exc_info=True)
+        return pd.DataFrame()
+    finally:
+        try:
+            if mycursor:
+                mycursor.close()
+                logging.debug("Cursor fechado")
+            if mydb:
+                mydb.close()
+                logging.debug("Conexão com banco de dados fechada")
+        except Exception as e:
+            logging.error(f"Erro ao fechar conexões: {str(e)}")
 
 def analyze_current_vs_historical(metadata_df):
     """
@@ -1084,72 +1138,26 @@ def main():
 
     st.header("📈 Análise de Momento: Histórico vs Atual")
     
-    # Carregar metadados das rotas
-    route_metadata = get_route_metadata()
-    if not route_metadata.empty:
-        analysis_df = analyze_current_vs_historical(route_metadata)
-        
-        with st.expander("🔍 Principais Observações", expanded=True):
-            st.markdown("""
-            **Relação Tempo vs Velocidade:**
-            - Quando avg_time > historic_time: Redução de velocidade (congestionamento)
-            - Quando avg_time < historic_time: Melhoria no fluxo
-            """)
+    with st.spinner("Carregando metadados das rotas..."):
+        try:
+            route_metadata = get_route_metadata()
+            if route_metadata.empty:
+                st.error("""
+                Falha ao carregar metadados. Verifique:
+                1. Conexão com o banco de dados
+                2. Existência da tabela 'routes'
+                3. Colunas obrigatórias na tabela
+                4. Registros com 'is_active = 1'
+                """)
+                logging.error("Metadados vazios - verificar pontos acima")
+                st.stop()
+                
+            analysis_df = analyze_current_vs_historical(route_metadata)
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Rotas Críticas", 
-                         len(analysis_df[analysis_df['status'] == 'Crítico']))
-            with col2:
-                avg_delay = analysis_df['var_time'].mean()
-                st.metric("Atraso Médio", f"{avg_delay:.1f}%")
-        
-        with st.expander("🚦 Top 5 Rotas com Maiores Discrepâncias"):
-            top_criticas = analysis_df[analysis_df['status'] == 'Crítico'].head(5)
-            if not top_criticas.empty:
-                for idx, row in top_criticas.iterrows():
-                    st.markdown(f"""
-                    **{row['name']}**
-                    - 🔴 Tempo Atual: {row['avg_time']}s (Histórico: {row['historic_time']}s)
-                    - 🚗 Velocidade Atual: {row['avg_speed']}km/h (Histórico: {row['historic_speed']}km/h)
-                    - 📈 Variação: +{row['var_time']:.1f}% tempo | {row['var_speed']:.1f}% velocidade
-                    """)
-            else:
-                st.info("Nenhuma rota crítica identificada")
-        
-        with st.expander("📊 Análise Detalhada por Categoria"):
-            st.dataframe(
-                analysis_df[['name', 'status', 'avg_time', 'historic_time', 
-                           'avg_speed', 'historic_speed', 'var_time', 'var_speed']],
-                column_config={
-                    "name": "Rota",
-                    "status": st.column_config.SelectboxColumn(
-                        "Status",
-                        options=["Normal", "Atenção", "Crítico"]
-                    ),
-                    "avg_time": "Tempo Atual (s)",
-                    "historic_time": "Tempo Histórico (s)",
-                    "avg_speed": "Velocidade Atual (km/h)",
-                    "historic_speed": "Velocidade Histórica (km/h)",
-                    "var_time": st.column_config.ProgressColumn(
-                        "Variação Tempo",
-                        format="+%.1f%%",
-                        min_value=-100,
-                        max_value=300
-                    ),
-                    "var_speed": st.column_config.ProgressColumn(
-                        "Variação Velocidade",
-                        format="%.1f%%",
-                        min_value=-100,
-                        max_value=100
-                    )
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-    else:
-        st.warning("Não foi possível carregar metadados das rotas")
-
+        except Exception as e:
+            st.error(f"Erro crítico na análise: {str(e)}")
+            logging.critical(f"Falha na análise principal: {str(e)}", exc_info=True)
+            st.stop()
 
     st.header("📊 Visualização de Dados Históricos")
 
