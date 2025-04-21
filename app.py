@@ -727,16 +727,24 @@ def gerar_insights(df):
 
 def get_route_metadata():
     """
-    Busca metadados das rotas de acordo com o schema fornecido
+    Busca metadados das rotas ativas com tratamento robusto de erros
+    Retorna DataFrame com colunas:
+    [id, name, jam_level, avg_speed, avg_time, historic_speed, historic_time]
     """
     mydb = None
     mycursor = None
     try:
-        logging.info("Iniciando busca de metadados das rotas...")
+        logging.info("Iniciando busca de metadados...")
         
+        # Conexão segura
         mydb = get_db_connection()
-        mycursor = mydb.cursor(dictionary=True)  # Usar cursor dicionário
+        if not mydb.is_connected():
+            logging.error("Conexão falhou")
+            return pd.DataFrame()
+            
+        mycursor = mydb.cursor(dictionary=True)
         
+        # Query com filtro is_active e verificação de schema
         query = """
             SELECT 
                 id,
@@ -747,19 +755,23 @@ def get_route_metadata():
                 historic_speed,
                 historic_time
             FROM routes
+            WHERE is_active = 1
+            AND avg_speed IS NOT NULL
+            AND avg_time IS NOT NULL
+            AND historic_speed IS NOT NULL
+            AND historic_time IS NOT NULL
         """
         
-        start_time = time.time()
         mycursor.execute(query)
-        
         results = mycursor.fetchall()
+        
         if not results:
-            logging.warning("Nenhuma rota ativa encontrada")
+            logging.warning("Nenhum dado válido encontrado")
             return pd.DataFrame()
             
         df = pd.DataFrame(results)
         
-        # Converter tipos de dados explicitamente
+        # Conversão segura de tipos
         conversions = {
             'avg_speed': 'float32',
             'avg_time': 'int32',
@@ -768,53 +780,57 @@ def get_route_metadata():
         }
         
         for col, dtype in conversions.items():
-            if col in df.columns:
-                try:
-                    df[col] = df[col].astype(dtype)
-                except Exception as e:
-                    logging.error(f"Erro na conversão de {col}: {str(e)}")
-                    df[col] = None
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype(dtype)
         
-        logging.info(f"Carregadas {len(df)} rotas ativas")
+        # Remover linhas inválidas após conversão
+        df = df.dropna()
+        
+        logging.info(f"Dados carregados: {len(df)} registros válidos")
         return df
 
     except mysql.connector.Error as err:
-        logging.error(f"Erro MySQL [{err.errno}]: {err.msg}")
+        logging.error(f"Erro MySQL: {err}", exc_info=True)
         return pd.DataFrame()
     except Exception as e:
-        logging.error(f"Erro inesperado: {str(e)}", exc_info=True)
+        logging.error(f"Erro crítico: {e}", exc_info=True)
         return pd.DataFrame()
     finally:
         try:
-            if mycursor:
-                mycursor.close()
-            if mydb and mydb.is_connected():
-                mydb.close()
+            if mycursor: mycursor.close()
+            if mydb: mydb.close()
         except Exception as e:
-            logging.error(f"Erro ao fechar conexões: {str(e)}")
-
+            logging.error(f"Erro ao fechar conexão: {e}")
 
 def analyze_current_vs_historical(metadata_df):
     """
-    Analisa os dados atuais vs históricos e gera insights.
-    Retorna DataFrame com métricas calculadas.
+    Analisa dados atuais vs históricos com tratamento de erros numéricos
     """
-    analysis_df = metadata_df.copy()
-    
-    # Calcular variações percentuais
-    analysis_df['var_time'] = ((analysis_df['avg_time'] - analysis_df['historic_time']) / analysis_df['historic_time']) * 100
-    analysis_df['var_speed'] = ((analysis_df['avg_speed'] - analysis_df['historic_speed']) / analysis_df['historic_speed']) * 100
-    
-    # Classificar status
-    analysis_df['status'] = np.where(
-        (analysis_df['var_time'] > 15) | (analysis_df['var_speed'] < -15),
-        'Crítico',
-        np.where(
-            (analysis_df['var_time'] > 5) | (analysis_df['var_speed'] < -5),
-            'Atenção',
-            'Normal'
-        )
-    )
+    try:
+        df = metadata_df.copy()
+        
+        # Substituir zeros para evitar divisão por zero
+        df['historic_time'] = df['historic_time'].replace(0, 1)
+        df['historic_speed'] = df['historic_speed'].replace(0, 1)
+        
+        # Cálculo seguro das variações
+        df['var_time'] = ((df['avg_time'] - df['historic_time']) / 
+                         df['historic_time']).fillna(0) * 100
+        df['var_speed'] = ((df['avg_speed'] - df['historic_speed']) / 
+                          df['historic_speed']).fillna(0) * 100
+        
+        # Classificação de status
+        conditions = [
+            (df['var_time'] > 15) | (df['var_speed'] < -15),
+            (df['var_time'] > 5) | (df['var_speed'] < -5)
+        ]
+        choices = ['Crítico', 'Atenção']
+        df['status'] = np.select(conditions, choices, default='Normal')
+        
+        return df.sort_values('var_time', ascending=False)
+        
+    except Exception as e:
+        logging.error(f"Falha na análise: {e}", exc_info=True)
+        return pd.DataFrame()
 
 
 # --- Função Principal do Aplicativo Streamlit ---
@@ -1128,71 +1144,94 @@ def main():
 
     st.header("📈 Análise de Momento: Histórico vs Atual")
     
-    # Carregar metadados das rotas
-    route_metadata = get_route_metadata()
-    if not route_metadata.empty:
-        analysis_df = analyze_current_vs_historical(route_metadata)
-        
-        with st.expander("🔍 Principais Observações", expanded=True):
-            st.markdown("""
-            **Relação Tempo vs Velocidade:**
-            - Quando avg_time > historic_time: Redução de velocidade (congestionamento)
-            - Quando avg_time < historic_time: Melhoria no fluxo
-            """)
+    try:
+        with st.spinner("Carregando análise comparativa..."):
+            # Carregar e validar metadados
+            route_metadata = get_route_metadata()
             
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Rotas Críticas", 
-                         len(analysis_df[analysis_df['status'] == 'Crítico']))
-            with col2:
-                avg_delay = analysis_df['var_time'].mean()
-                st.metric("Atraso Médio", f"{avg_delay:.1f}%")
-        
-        with st.expander("🚦 Top 5 Rotas com Maiores Discrepâncias"):
-            top_criticas = analysis_df[analysis_df['status'] == 'Crítico'].head(5)
-            if not top_criticas.empty:
-                for idx, row in top_criticas.iterrows():
-                    st.markdown(f"""
-                    **{row['name']}**
-                    - 🔴 Tempo Atual: {row['avg_time']}s (Histórico: {row['historic_time']}s)
-                    - 🚗 Velocidade Atual: {row['avg_speed']}km/h (Histórico: {row['historic_speed']}km/h)
-                    - 📈 Variação: +{row['var_time']:.1f}% tempo | {row['var_speed']:.1f}% velocidade
-                    """)
-            else:
-                st.info("Nenhuma rota crítica identificada")
-        
-        with st.expander("📊 Análise Detalhada por Categoria"):
-            st.dataframe(
-                analysis_df[['name', 'status', 'avg_time', 'historic_time', 
-                           'avg_speed', 'historic_speed', 'var_time', 'var_speed']],
-                column_config={
-                    "name": "Rota",
-                    "status": st.column_config.SelectboxColumn(
-                        "Status",
-                        options=["Normal", "Atenção", "Crítico"]
-                    ),
-                    "avg_time": "Tempo Atual (s)",
-                    "historic_time": "Tempo Histórico (s)",
-                    "avg_speed": "Velocidade Atual (km/h)",
-                    "historic_speed": "Velocidade Histórica (km/h)",
-                    "var_time": st.column_config.ProgressColumn(
-                        "Variação Tempo",
-                        format="+%.1f%%",
-                        min_value=-100,
-                        max_value=300
-                    ),
-                    "var_speed": st.column_config.ProgressColumn(
-                        "Variação Velocidade",
-                        format="%.1f%%",
-                        min_value=-100,
-                        max_value=100
-                    )
-                },
-                hide_index=True,
-                use_container_width=True
-            )
-    else:
-        st.warning("Não foi possível carregar metadados das rotas")
+            if route_metadata.empty:
+                st.error("""
+                ⚠️ Dados não encontrados. Verifique:
+                1. Rotas marcadas como ativas (is_active = 1)
+                2. Dados numéricos preenchidos
+                3. Conexão com o banco de dados
+                """)
+                return
+            
+            # Gerar análise
+            analysis_df = analyze_current_vs_historical(route_metadata)
+            
+            if analysis_df.empty:
+                st.error("Falha ao gerar análise dos dados")
+                return
+            
+            # Widgets de visualização
+            with st.expander("🔍 Principais Métricas", expanded=True):
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    crit_count = analysis_df[analysis_df['status'] == 'Crítico'].shape[0]
+                    st.metric("Rotas Críticas", f"{crit_count} ⚠️")
+                
+                with col2:
+                    avg_delay = analysis_df['var_time'].mean()
+                    st.metric("Atraso Médio", f"{avg_delay:.1f}%", 
+                             help="Variação média do tempo em relação ao histórico")
+                
+                with col3:
+                    speed_loss = analysis_df['var_speed'].mean()
+                    st.metric("Perda de Velocidade", f"{speed_loss:.1f}%",
+                             help="Variação média da velocidade em relação ao histórico")
+            
+            with st.expander("🚨 Top 5 Rotas Críticas", expanded=True):
+                criticas = analysis_df[analysis_df['status'] == 'Crítico'].head(5)
+                
+                if not criticas.empty:
+                    for _, row in criticas.iterrows():
+                        st.markdown(f"""
+                        ### {row['name']}
+                        - **Tempo Atual:** {row['avg_time']}s (Histórico: {row['historic_time']}s)
+                        - **Velocidade Atual:** {row['avg_speed']:.1f}km/h (Histórico: {row['historic_speed']:.1f}km/h)
+                        - **Variações:** 
+                          🕒 +{row['var_time']:.1f}% tempo | 🚗 {row['var_speed']:.1f}% velocidade
+                        """)
+                        st.progress(max(0, min(row['var_time']/100, 1)), 
+                                   text=f"Gravidade: {row['var_time']:.1f}%")
+                else:
+                    st.success("🎉 Nenhuma rota crítica identificada")
+            
+            with st.expander("📊 Tabela Detalhada", expanded=False):
+                st.dataframe(
+                    analysis_df,
+                    column_config={
+                        "name": "Rota",
+                        "status": st.column_config.SelectboxColumn(
+                            "Status",
+                            options=["Crítico", "Atenção", "Normal"],
+                            default="Normal"
+                        ),
+                        "var_time": st.column_config.ProgressColumn(
+                            "Variação Tempo",
+                            help="Aumento percentual do tempo de viagem",
+                            format="+%.1f%%",
+                            min_value=-100,
+                            max_value=300
+                        ),
+                        "var_speed": st.column_config.ProgressColumn(
+                            "Variação Velocidade",
+                            help="Mudança percentual na velocidade média",
+                            format="%.1f%%",
+                            min_value=-100,
+                            max_value=100
+                        )
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+    
+    except Exception as e:
+        st.error("Erro crítico na análise. Verifique os logs para detalhes.")
+        logging.critical(f"Falha na análise principal: {str(e)}", exc_info=True)
 
         
     st.header("📊 Visualização de Dados Históricos")
