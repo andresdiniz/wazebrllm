@@ -735,13 +735,37 @@ def get_route_metadata():
     try:
         logging.info("Iniciando busca de metadados das rotas...")
         
-        mydb = get_db_connection()
-        if mydb is None:
-            logging.error("Falha na conexão com o banco de dados")
+        # Verificar conexão
+        try:
+            mydb = get_db_connection()
+            if mydb.is_connected():
+                logging.info("Conexão com banco estabelecida")
+            else:
+                logging.error("Falha na conexão com o banco")
+                return pd.DataFrame()
+        except Exception as conn_err:
+            logging.error(f"Erro de conexão: {str(conn_err)}")
+            return pd.DataFrame()
+
+        mycursor = mydb.cursor(dictionary=True)
+        
+        # Verificar existência da tabela
+        mycursor.execute("SHOW TABLES LIKE 'routes'")
+        if not mycursor.fetchone():
+            logging.error("Tabela 'routes' não existe")
             return pd.DataFrame()
             
-        mycursor = mydb.cursor()
-        
+        # Verificar existência da coluna is_active
+        mycursor.execute("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = 'routes' 
+            AND COLUMN_NAME = 'is_active'
+        """)
+        if not mycursor.fetchone():
+            logging.error("Coluna 'is_active' não existe na tabela routes")
+            return pd.DataFrame()
+
         query = """
             SELECT 
                 id, name, jam_level, 
@@ -750,45 +774,42 @@ def get_route_metadata():
             FROM routes
             WHERE is_active = 1
         """
-        logging.debug(f"Executando query: {query}")
         
+        logging.debug(f"Executando query: {query}")
         start_time = time.time()
         mycursor.execute(query)
-        execution_time = time.time() - start_time
-        logging.info(f"Query executada com sucesso em {execution_time:.2f}s")
         
+        # Verificar resultados
         results = mycursor.fetchall()
-        logging.info(f"Total de registros encontrados: {len(results)}")
-        
         if not results:
-            logging.warning("Nenhum registro encontrado na tabela routes")
+            logging.warning("Nenhuma rota ativa encontrada")
             return pd.DataFrame()
             
-        col_names = [desc[0] for desc in mycursor.description]
-        df = pd.DataFrame(results, columns=col_names)
+        df = pd.DataFrame(results)
         
-        # Verificar colunas essenciais
-        required_columns = ['avg_speed', 'avg_time', 'historic_speed', 'historic_time']
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        # Verificar colunas obrigatórias
+        required_columns = {
+            'avg_speed': 'float64',
+            'avg_time': 'int64',
+            'historic_speed': 'float64',
+            'historic_time': 'int64'
+        }
         
-        if missing_columns:
-            logging.error(f"Colunas obrigatórias ausentes: {missing_columns}")
-            return pd.DataFrame()
-            
-        # Converter tipos de dados
-        try:
-            numeric_cols = ['avg_speed', 'avg_time', 'historic_speed', 'historic_time']
-            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
-        except Exception as e:
-            logging.error(f"Erro na conversão numérica: {str(e)}")
-            return pd.DataFrame()
-            
-        logging.info("Metadados processados com sucesso")
+        for col, dtype in required_columns.items():
+            if col not in df.columns:
+                logging.error(f"Coluna obrigatória ausente: {col}")
+                return pd.DataFrame()
+            try:
+                df[col] = df[col].astype(dtype)
+            except Exception as e:
+                logging.error(f"Erro na conversão da coluna {col}: {str(e)}")
+                return pd.DataFrame()
+        
+        logging.info(f"Metadados carregados: {len(df)} rotas ativas")
         return df
-        
+
     except mysql.connector.Error as err:
         logging.error(f"Erro MySQL [{err.errno}]: {err.msg}")
-        logging.debug(f"SQL State: {err.sqlstate}", exc_info=True)
         return pd.DataFrame()
     except Exception as e:
         logging.error(f"Erro inesperado: {str(e)}", exc_info=True)
@@ -797,12 +818,11 @@ def get_route_metadata():
         try:
             if mycursor:
                 mycursor.close()
-                logging.debug("Cursor fechado")
-            if mydb:
+            if mydb and mydb.is_connected():
                 mydb.close()
-                logging.debug("Conexão com banco de dados fechada")
         except Exception as e:
             logging.error(f"Erro ao fechar conexões: {str(e)}")
+
 
 def analyze_current_vs_historical(metadata_df):
     """
@@ -1138,27 +1158,36 @@ def main():
 
     st.header("📈 Análise de Momento: Histórico vs Atual")
     
-    with st.spinner("Carregando metadados das rotas..."):
-        try:
+    try:
+        with st.spinner("Carregando metadados das rotas..."):
             route_metadata = get_route_metadata()
+            
             if route_metadata.empty:
                 st.error("""
-                Falha ao carregar metadados. Verifique:
+                ⚠️ Falha ao carregar metadados. Verifique:
                 1. Conexão com o banco de dados
                 2. Existência da tabela 'routes'
-                3. Colunas obrigatórias na tabela
+                3. Colunas obrigatórias na tabela:
+                   - avg_speed
+                   - avg_time  
+                   - historic_speed
+                   - historic_time
+                   - is_active
                 4. Registros com 'is_active = 1'
                 """)
-                logging.error("Metadados vazios - verificar pontos acima")
+                logging.error("Metadados vazios - verificar estrutura do banco")
                 st.stop()
                 
             analysis_df = analyze_current_vs_historical(route_metadata)
             
-        except Exception as e:
-            st.error(f"Erro crítico na análise: {str(e)}")
-            logging.critical(f"Falha na análise principal: {str(e)}", exc_info=True)
-            st.stop()
+            # Restante da análise...
+            
+    except Exception as e:
+        st.error(f"Erro crítico: {str(e)}")
+        logging.critical(f"Falha na análise principal: {str(e)}", exc_info=True)
+        st.stop()
 
+        
     st.header("📊 Visualização de Dados Históricos")
 
     # --- Comparação Visual de Dados Históricos (Gráfico de Linha Plotly) ---
