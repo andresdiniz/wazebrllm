@@ -747,7 +747,6 @@ def get_route_metadata():
                 historic_time,
                 is_active
             FROM routes
-            WHERE is_active = 1
         """
         
         start_time = time.time()
