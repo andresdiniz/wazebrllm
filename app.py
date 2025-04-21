@@ -283,9 +283,8 @@ def get_data(start_date=None, end_date=None, route_name=None):
 
         query = """
             SELECT hr.route_id, r.name AS route_name, hr.data, hr.velocidade
-        FROM historic_routes hr
-        JOIN routes r ON hr.route_id = r.id
-        WHERE r.id_parceiro = 2 
+            FROM historic_routes hr
+            JOIN routes r ON hr.route_id = r.id
         """
         conditions = []
         params = []
@@ -340,7 +339,7 @@ def get_all_route_names():
     try:
         mydb = get_db_connection()
         mycursor = mydb.cursor()
-        query = "SELECT DISTINCT name FROM routes WHERE id_parceiro = 2"
+        query = "SELECT DISTINCT name FROM routes"
         mycursor.execute(query)
         results = mycursor.fetchall()
         return [row[0] for row in results]
@@ -369,13 +368,7 @@ def get_route_coordinates(route_id):
     try:
         mydb = get_db_connection()
         mycursor = mydb.cursor()
-        query = """
-        SELECT rl.x, rl.y 
-        FROM route_lines rl
-        JOIN routes r ON rl.route_id = r.id
-        WHERE rl.route_id = %s 
-        AND r.id_parceiro = 2  -- Condição adicionada
-        ORDER BY rl.id"""
+        query = "SELECT x, y FROM route_lines WHERE route_id = %s ORDER BY id"
         mycursor.execute(query, (route_id,))
         results = mycursor.fetchall()
         df = pd.DataFrame(results, columns=['longitude', 'latitude'])
@@ -762,8 +755,7 @@ def get_route_metadata():
                 historic_speed,
                 historic_time
             FROM routes
-            WHERE id_parceiro = 2 
-            avg_speed IS NOT NULL
+            WHERE avg_speed IS NOT NULL
             AND avg_time IS NOT NULL
             AND historic_speed IS NOT NULL
             AND historic_time IS NOT NULL
