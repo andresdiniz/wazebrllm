@@ -764,8 +764,7 @@ def get_route_metadata():
             'avg_speed': 'float32',
             'avg_time': 'int32',
             'historic_speed': 'float32',
-            'historic_time': 'int32',
-            'is_active': 'bool'
+            'historic_time': 'int32'
         }
         
         for col, dtype in conversions.items():
@@ -775,9 +774,6 @@ def get_route_metadata():
                 except Exception as e:
                     logging.error(f"Erro na conversão de {col}: {str(e)}")
                     df[col] = None
-        
-        # Filtrar novamente após conversão
-        df = df[df['is_active'] == True]
         
         logging.info(f"Carregadas {len(df)} rotas ativas")
         return df
