@@ -25,6 +25,7 @@ from pmdarima import auto_arima
 from sklearn.metrics import mean_absolute_error
 import datetime # Importar datetime para manipular dates
 import holidays # Importar a biblioteca holidays para feriados
+import time # Importar time para manipulação de tempo
 
 
 # Configurações de compatibilidade do numpy (manter se for necessário no seu ambiente)
