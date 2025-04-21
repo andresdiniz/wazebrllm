@@ -755,8 +755,7 @@ def get_route_metadata():
                 historic_speed,
                 historic_time
             FROM routes
-            WHERE is_active = 1
-            AND avg_speed IS NOT NULL
+            WHERE avg_speed IS NOT NULL
             AND avg_time IS NOT NULL
             AND historic_speed IS NOT NULL
             AND historic_time IS NOT NULL
