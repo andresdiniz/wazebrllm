@@ -833,23 +833,20 @@ def analyze_current_vs_historical(metadata_df):
 
 # NOVA FUNÇÃO: Painel de qualidade dos dados
 def painel_qualidade(df):
-    """Exibe métricas de qualidade dos dados"""
     st.subheader("🧪 Qualidade dos Dados")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        nulos = df['velocidade'].isnull().sum()
-        total = len(df)
-        st.metric("Valores Nulos", f"{nulos} ({nulos/total:.1%})")
-    
-    with col2:
-        gaps = df['data'].diff().dt.total_seconds().gt(300).sum()
-        st.metric("Lacunas >5min", f"{gaps} ocorrências")
-    
-    with col3:
-        freq_estimada = df['data'].diff().mode()[0]
-        st.metric("Frequência", str(freq_estimada).split(" ")[0])
+    if 'velocidade' not in df.columns:
+        st.warning("⚠️ A coluna 'velocidade' não foi encontrada no DataFrame.")
+        st.dataframe(df)  # Debug: Mostra o que veio
+        return
+
+    nulos = df['velocidade'].isnull().sum()
+    total = len(df)
+    gaps = df['data'].diff().dt.total_seconds().gt(300).sum()
+    st.metric("Valores Nulos", f"{nulos} ({nulos/total:.1%})")
+    st.metric("Gaps > 5min", f"{gaps} ocorrências")
+    freq_estimada = df['data'].diff().mode()[0]
+    st.write(f"Frequência estimada: {freq_estimada}")
+
 
 # NOVA FUNÇÃO: Exportar para Excel
 def exportar_excel(df):
