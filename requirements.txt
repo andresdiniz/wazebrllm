@@ -2,7 +2,7 @@ streamlit==1.35.0 # Ou a versão mais recente que você preferir
 pandas==1.5.3
 numpy>=1.24.3
 sqlalchemy==2.0.11
-mysql-connector-python==8.2.0
+mysql-connector-python==8.0.30
 matplotlib==3.7.1
 seaborn==0.12.2
 statsmodels==0.14.0
@@ -15,4 +15,3 @@ pmdarima==2.0.4
 kaleido==0.2.1
 holidays
 logging
-xlsxwriter
