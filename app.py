@@ -244,7 +244,6 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # password = "@Ndre2025." # Mude isso para sua senha real ou use secrets
 # database = "u335174317_wazeportal"
 
-@st.cache_resource # Cache a conexão com o banco de dados para melhorar o desempenho
 def get_db_connection():
     """
     Estabelece e retorna uma conexão com o banco de dados MySQL.
@@ -327,7 +326,6 @@ def get_data(start_date=None, end_date=None, route_name=None):
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-@st.cache_resource
 def get_all_route_names():
     """
     Busca todos os nomes de rotas distintos no banco de dados.
