@@ -850,15 +850,19 @@ def painel_qualidade(df):
 
 # NOVA FUNÇÃO: Exportar para Excel
 def exportar_excel(df):
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Relatório')
-    st.download_button(
-        label="📥 Baixar Excel",
-        data=output.getvalue(),
-        file_name="relatorio_rotas.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    try:
+        import xlsxwriter  # Importa apenas se for exportar
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Relatório')
+        st.download_button(
+            label="📥 Baixar Excel",
+            data=output.getvalue(),
+            file_name="relatorio_rotas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    except ModuleNotFoundError:
+        st.error("O pacote `xlsxwriter` não está instalado. Adicione ao `requirements.txt` ou instale com `pip install xlsxwriter`.")
 
 # NOVA FUNÇÃO: Sugerir horários
 def sugerir_horarios(df):
