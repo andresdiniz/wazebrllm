@@ -354,7 +354,6 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
-st.cache_resource # Cache a função de busca de coordenadas para melhorar o desempenho
 def get_route_coordinates(route_id):
     """
     Busca as coordenadas geográficas (linha) para uma rota específica.
