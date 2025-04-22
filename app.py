@@ -1106,7 +1106,7 @@ def main():
 
             with st.spinner(f'Carregando e processando dados para {route}...'):
             # Carregar dados
-            raw_df, error = get_data(...)
+                raw_df, error = get_data(...)
             
             # NOVO: Painel de qualidade
             with st.expander(f"🔍 Qualidade dos Dados - {route}", expanded=False):
