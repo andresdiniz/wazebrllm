@@ -831,6 +831,50 @@ def analyze_current_vs_historical(metadata_df):
         logging.error(f"Falha na análise: {e}", exc_info=True)
         return pd.DataFrame()
 
+# NOVA FUNÇÃO: Painel de qualidade dos dados
+def painel_qualidade(df):
+    """Exibe métricas de qualidade dos dados"""
+    st.subheader("🧪 Qualidade dos Dados")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        nulos = df['velocidade'].isnull().sum()
+        total = len(df)
+        st.metric("Valores Nulos", f"{nulos} ({nulos/total:.1%})")
+    
+    with col2:
+        gaps = df['data'].diff().dt.total_seconds().gt(300).sum()
+        st.metric("Lacunas >5min", f"{gaps} ocorrências")
+    
+    with col3:
+        freq_estimada = df['data'].diff().mode()[0]
+        st.metric("Frequência", str(freq_estimada).split(" ")[0])
+
+# NOVA FUNÇÃO: Exportar para Excel
+def exportar_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Relatório')
+    st.download_button(
+        label="📥 Baixar Excel",
+        data=output.getvalue(),
+        file_name="relatorio_rotas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+# NOVA FUNÇÃO: Sugerir horários
+def sugerir_horarios(df):
+    if df.empty:
+        return
+    
+    melhores = df.sort_values("velocidade", ascending=False).head(5)
+    with st.expander("🎯 Horários Recomendados", expanded=True):
+        st.markdown("**Melhores horários para circulação:**")
+        for idx, row in melhores.iterrows():
+            st.write(f"- {row['data'].strftime('%A %H:%M')} - {row['velocidade']:.1f} km/h")
+        st.caption("Baseado nos históricos de velocidade média")
+
 
 # --- Função Principal do Aplicativo Streamlit ---
 
@@ -998,8 +1042,9 @@ def main():
         routes_to_process.append(second_route)
 
     # --- Carregamento e Processamento de Dados ---
+    # --- Carregamento e Processamento de Dados ---
     st.header("⏳ Processando Dados...")
-    processed_dfs = {} # Dicionário para armazenar os DataFrames processados
+    processed_dfs = {} 
 
     for route in routes_to_process:
         date_range = date_range_main if route == route_name else date_range_secondary
@@ -1058,6 +1103,28 @@ def main():
                 'data': processed_df,
                 'id': route_id
             }
+
+            with st.spinner(f'Carregando e processando dados para {route}...'):
+            # Carregar dados
+            raw_df, error = get_data(...)
+            
+            # NOVO: Painel de qualidade
+            with st.expander(f"🔍 Qualidade dos Dados - {route}", expanded=False):
+                painel_qualidade(raw_df)
+
+            # Processamento restante mantido
+            processed_df = clean_data(raw_df)
+            
+            # NOVO: Botão de exportação
+            with st.expander(f"💾 Exportar Dados - {route}", expanded=False):
+                exportar_excel(processed_df)
+
+            routes_info[route] = {'data': processed_df, 'id': route_id}
+            # Adicionar indicador de qualidade dos dados (dados ausentes)
+            total_records = len(raw_df)
+            initial_nulls = raw_df['velocidade'].isnull().sum()
+            initial_null_percentage = (initial_nulls / total_records) * 100 if total_records > 0 else 0
+            st.metric(f"Dados Ausentes Inicialmente ({route})", f"{initial_null_percentage:.1f}%")
             processed_dfs[route] = processed_df # Armazena para comparação
         st.toast(f"Dados para {route} carregados e processados ({len(processed_df)} registros).", icon="✅") # Feedback com toast
 
@@ -1234,6 +1301,21 @@ def main():
 
         
     st.header("📊 Visualização de Dados Históricos")
+
+    for route in routes_to_process:
+        if route in routes_info and not routes_info[route]['data'].empty:
+            with st.expander(f"Análise para {route}", expanded=True):
+                
+                # Seção de Insights
+                st.subheader("🧠 Insights Automáticos")
+                st.markdown(gerar_insights(processed_df))
+                
+                # NOVO: Recomendações de horários
+                sugerir_horarios(processed_df)
+
+                # Restante das seções mantidas
+                st.subheader("📉 Decomposição Temporal")
+                seasonal_decomposition_plot(processed_df)
 
     # --- Comparação Visual de Dados Históricos (Gráfico de Linha Plotly) ---
     if len(processed_dfs) > 0:
