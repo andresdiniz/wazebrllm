@@ -1077,10 +1077,15 @@ def main():
                 continue # Pula para a próxima rota
 
             # Adicionar indicador de qualidade dos dados (dados ausentes)
-            total_records = len(raw_df)
-            initial_nulls = raw_df['velocidade'].isnull().sum()
-            initial_null_percentage = (initial_nulls / total_records) * 100 if total_records > 0 else 0
-            st.metric(f"Dados Ausentes Inicialmente ({route})", f"{initial_null_percentage:.1f}%")
+            if 'velocidade' in raw_df.columns:
+                total_records = len(raw_df)
+                initial_nulls = raw_df['velocidade'].isnull().sum()
+                initial_null_percentage = (initial_nulls / total_records) * 100 if total_records > 0 else 0
+                st.metric(f"Dados Ausentes Inicialmente ({route})", f"{initial_null_percentage:.1f}%")
+            else:
+                st.warning(f"⚠️ A coluna 'velocidade' não foi encontrada para a rota {route}. Verifique os dados retornados.")
+                st.dataframe(raw_df)  # Opcional: ajuda no debug
+                continue  # Pula essa rota se a coluna não existir
 
             # Obter o ID da rota (assumindo que há apenas um ID por nome no período selecionado)
             try:
