@@ -423,6 +423,7 @@ def clean_data(df):
     df['hour'] = df['data'].dt.hour
     return df.dropna(subset=['velocidade']) # Remove linhas onde a velocidade ainda é NaN
 
+
 def seasonal_decomposition_plot(df):
     """
     Realiza e plota a decomposição sazonal de uma série temporal de velocidade.
@@ -832,36 +833,35 @@ def analyze_current_vs_historical(metadata_df):
 
 # NOVA FUNÇÃO: Painel de qualidade dos dados
 def painel_qualidade(df):
+    """Exibe métricas de qualidade dos dados"""
     st.subheader("🧪 Qualidade dos Dados")
-    if 'velocidade' not in df.columns:
-        st.warning("⚠️ A coluna 'velocidade' não foi encontrada no DataFrame.")
-        st.dataframe(df)  # Debug: Mostra o que veio
-        return
-
-    nulos = df['velocidade'].isnull().sum()
-    total = len(df)
-    gaps = df['data'].diff().dt.total_seconds().gt(300).sum()
-    st.metric("Valores Nulos", f"{nulos} ({nulos/total:.1%})")
-    st.metric("Gaps > 5min", f"{gaps} ocorrências")
-    freq_estimada = df['data'].diff().mode()[0]
-    st.write(f"Frequência estimada: {freq_estimada}")
-
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        nulos = df['velocidade'].isnull().sum()
+        total = len(df)
+        st.metric("Valores Nulos", f"{nulos} ({nulos/total:.1%})")
+    
+    with col2:
+        gaps = df['data'].diff().dt.total_seconds().gt(300).sum()
+        st.metric("Lacunas >5min", f"{gaps} ocorrências")
+    
+    with col3:
+        freq_estimada = df['data'].diff().mode()[0]
+        st.metric("Frequência", str(freq_estimada).split(" ")[0])
 
 # NOVA FUNÇÃO: Exportar para Excel
 def exportar_excel(df):
-    try:
-        import xlsxwriter  # Importa apenas se for exportar
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False, sheet_name='Relatório')
-        st.download_button(
-            label="📥 Baixar Excel",
-            data=output.getvalue(),
-            file_name="relatorio_rotas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    except ModuleNotFoundError:
-        st.error("O pacote `xlsxwriter` não está instalado. Adicione ao `requirements.txt` ou instale com `pip install xlsxwriter`.")
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Relatório')
+    st.download_button(
+        label="📥 Baixar Excel",
+        data=output.getvalue(),
+        file_name="relatorio_rotas.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 # NOVA FUNÇÃO: Sugerir horários
 def sugerir_horarios(df):
@@ -1076,15 +1076,10 @@ def main():
                 continue # Pula para a próxima rota
 
             # Adicionar indicador de qualidade dos dados (dados ausentes)
-            if 'velocidade' in raw_df.columns:
-                total_records = len(raw_df)
-                initial_nulls = raw_df['velocidade'].isnull().sum()
-                initial_null_percentage = (initial_nulls / total_records) * 100 if total_records > 0 else 0
-                st.metric(f"Dados Ausentes Inicialmente ({route})", f"{initial_null_percentage:.1f}%")
-            else:
-                st.warning(f"⚠️ A coluna 'velocidade' não foi encontrada para a rota {route}. Verifique os dados retornados.")
-                st.dataframe(raw_df)  # Opcional: ajuda no debug
-                continue  # Pula essa rota se a coluna não existir
+            total_records = len(raw_df)
+            initial_nulls = raw_df['velocidade'].isnull().sum()
+            initial_null_percentage = (initial_nulls / total_records) * 100 if total_records > 0 else 0
+            st.metric(f"Dados Ausentes Inicialmente ({route})", f"{initial_null_percentage:.1f}%")
 
             # Obter o ID da rota (assumindo que há apenas um ID por nome no período selecionado)
             try:
@@ -1111,7 +1106,7 @@ def main():
 
             with st.spinner(f'Carregando e processando dados para {route}...'):
             # Carregar dados
-                raw_df, error = get_data(...)
+            raw_df, error = get_data(...)
             
             # NOVO: Painel de qualidade
             with st.expander(f"🔍 Qualidade dos Dados - {route}", expanded=False):
