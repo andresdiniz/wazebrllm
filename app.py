@@ -244,6 +244,7 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # password = "@Ndre2025." # Mude isso para sua senha real ou use secrets
 # database = "u335174317_wazeportal"
 
+@st.cache_resource # Cache a conexão com o banco de dados para melhorar o desempenho
 def get_db_connection():
     """
     Estabelece e retorna uma conexão com o banco de dados MySQL.
@@ -263,6 +264,7 @@ def get_db_connection():
         st.error(f"Erro ao conectar ao banco de dados: {e}")
         st.stop() # Parar a execução se não conseguir conectar
 
+@st.cache_resource.clear() # Limpar o cache se necessário (opcional, dependendo do uso)
 def get_data(start_date=None, end_date=None, route_name=None):
     """
     Busca dados históricos de velocidade do banco de dados para uma rota e período específicos.
@@ -326,6 +328,7 @@ def get_data(start_date=None, end_date=None, route_name=None):
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
+@cache_resource # Cache a lista de nomes de rotas para melhorar o desempenho
 def get_all_route_names():
     """
     Busca todos os nomes de rotas distintos no banco de dados.
@@ -352,6 +355,7 @@ def get_all_route_names():
             mycursor.close()
         # Não feche a conexão 'mydb' aqui, pois ela é gerenciada por st.cache_resource
 
+@__cached__resource # Cache a lista de IDs de rotas para melhorar o desempenho
 def get_route_coordinates(route_id):
     """
     Busca as coordenadas geográficas (linha) para uma rota específica.
@@ -422,7 +426,6 @@ def clean_data(df):
     df['day_of_week'] = df['data'].dt.day_name() # Retorna em inglês por padrão, mapearemos para o heatmap
     df['hour'] = df['data'].dt.hour
     return df.dropna(subset=['velocidade']) # Remove linhas onde a velocidade ainda é NaN
-
 
 def seasonal_decomposition_plot(df):
     """
