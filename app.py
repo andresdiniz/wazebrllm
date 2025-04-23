@@ -529,7 +529,267 @@ def create_holiday_exog(index):
 # Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados E EXOG)
 # Não cacheamos previsões pois elas dependem de dados recentes e podem ser acionadas pelo usuário
 # @st.cache_data # Não use cache_data para previsões se elas devem ser geradas sob demanda
-def create_arima_forecast(df, route_id, steps=10, m_period=480):
+def create_arima_forecast(df, route_id, steps=10): # Removido m_period fixo
+    """
+    Cria e executa um modelo de previsão ARIMA sazonal com variáveis exógenas (feriados/vésperas).
+    Tenta inferir a frequência dos dados e calcula o período sazonal diário.
+
+    Args:
+        df (pd.DataFrame): DataFrame com dados históricos de velocidade limpos.
+                           Deve ter colunas 'data' (datetime) e 'velocidade'.
+        route_id (int): ID da rota.
+        steps (int, optional): Número de passos futuros para prever. Defaults to 10.
+
+    Returns:
+        pd.DataFrame: DataFrame com a previsão (datas, yhat, limites de confiança) ou DataFrame vazio em caso de falha.
+    """
+    logging.info(f"Iniciando create_arima_forecast para route_id {route_id}.")
+
+    if df is None or df.empty or 'data' not in df.columns or 'velocidade' not in df.columns:
+        logging.warning("DataFrame vazio, None, ou faltando colunas essenciais ('data', 'velocidade') fornecido para create_arima_forecast.")
+        st.warning("Não há dados válidos (DataFrame vazio ou incompleto) para gerar a previsão.")
+        return pd.DataFrame()
+
+    logging.info(f"Pontos iniciais limpos fornecidos para ARIMA: {len(df)} registros.")
+
+    # 1. Preparar dados para auto_arima: Setar índice, inferir frequência e interpolar
+    try:
+        # Garante que a coluna 'data' é datetime antes de setar como índice
+        df['data'] = pd.to_datetime(df['data'])
+        df_ts = df.set_index('data')['velocidade'].sort_index() # Garantir ordenação por índice
+
+        logging.info(f"Pontos após set_index: {len(df_ts)}") # Log 1: Após setar índice
+
+        # Tentar calcular a frequência dominante dos dados
+        freq_str = None
+        calculated_period = None
+        try:
+            diffs = df_ts.index.to_series().diff().dropna()
+            if not diffs.empty:
+                 # Encontrar a diferença de tempo mais frequente (moda)
+                 mode_td_series = diffs.mode()
+                 if not mode_td_series.empty and mode_td_series.iloc[0] > pd.Timedelta(seconds=0):
+                      mode_td = mode_td_series.iloc[0]
+                      logging.info(f"Diferença de tempo mais frequente (moda): {mode_td}")
+
+                      # Tentar converter a Timedelta moda para uma string de frequência reconhecida pelo pandas
+                      # Isso pode falhar para timedeltas complexos
+                      try:
+                          freq_str = pd.tseries.frequencies.to_offset(mode_td).freqstr
+                          logging.info(f"Frequência inferida a partir da moda: {freq_str}")
+
+                          # Calcular o período sazonal diário com base nesta frequência
+                          period_td = pd.Timedelta(days=1)
+                          # Usar round para lidar com pequenas imprecisões em floats resultantes da divisão
+                          calculated_period_float = period_td / mode_td
+                          calculated_period = max(1, int(round(calculated_period_float)))
+
+
+                          logging.info(f"Período sazonal diário calculado ({period_td} / {mode_td}) = {calculated_period}")
+
+                      except Exception as e:
+                          logging.warning(f"Não foi possível converter moda Timedelta ({mode_td}) para string de frequência ou calcular período: {e}", exc_info=True)
+                          freq_str = None # Reset para usar default
+
+                 else:
+                      logging.warning("Moda das diferenças de tempo é vazia ou zero.")
+            else:
+                 logging.warning("Diferenças de tempo vazias no índice.")
+
+        except Exception as e:
+            logging.warning(f"Erro ao tentar inferir frequência dos dados: {e}", exc_info=True)
+            freq_str = None # Em caso de qualquer erro na inferência, usar default
+
+
+        # Usar frequência inferida ou fallback para '3min' (período 480)
+        if freq_str is None or calculated_period is None or calculated_period <= 1:
+             freq_str = '3min'
+             calculated_period = 480
+             logging.info(f"Usando frequência default '{freq_str}' e período default {calculated_period} para ARIMA.")
+             st.info(f"Frequência dos dados não detectada automaticamente ou inválida. Usando frequência '{freq_str}' e período sazonal {calculated_period}.")
+        else:
+             st.info(f"Frequência dos dados detectada como '{freq_str}'. Usando período sazonal diário {calculated_period}.")
+
+
+        # Aplicar a frequência calculada ao índice
+        df_ts_freq = df_ts.asfreq(freq_str)
+        logging.info(f"Pontos após asfreq ({freq_str}): {len(df_ts_freq)}") # Log 2: Após asfreq
+        logging.info(f"NaNs após asfreq: {df_ts_freq.isnull().sum()}") # Log 3: NaNs após asfreq
+
+        # **CORREÇÃO**: Interpolar valores ausentes após definir a frequência, antes de dropar
+        df_ts_freq_interp = df_ts_freq.interpolate(method='time')
+        logging.info(f"Pontos após interpolação: {len(df_ts_freq_interp)}") # Log 4: Após interpolação
+        logging.info(f"NaNs após interpolação: {df_ts_freq_interp.isnull().sum()}") # Log 5: NaNs após interpolação
+
+
+        # Remover NaNs que possam ter ficado no início/fim ou em grandes lacunas após a interpolação
+        arima_data_full = df_ts_freq_interp.dropna()
+        logging.info(f"Pontos válidos após asfreq, interpolação e dropna inicial: {len(arima_data_full)}") # Log 6: Após dropna pós-interpolação
+
+
+    except Exception as e:
+        logging.error(f"Erro ao preparar série temporal para ARIMA (set_index/asfreq/interpolate/dropna): {e}", exc_info=True)
+        st.error(f"Erro ao preparar dados para o modelo ARIMA: {e}")
+        return pd.DataFrame()
+
+    if arima_data_full.empty:
+         st.warning("Dados insuficientes ou não regularmente espaçados restaram após o pré-processamento para treinar o modelo ARIMA.")
+         logging.warning("Dados insuficientes restantes após pré-processamento para treinar o modelo ARIMA.")
+         return pd.DataFrame()
+
+
+    # 2. Criar features exógenas (feriados e vésperas) e alinhar
+    exog_data_full = create_holiday_exog(arima_data_full.index)
+
+    try:
+        # Use join para garantir alinhamento do índice
+        # Inner join garante que temos y e X para os mesmos timestamps
+        # Use .align() que é mais robusto para séries temporais
+        arima_data_aligned, exog_data_aligned = arima_data_full.align(exog_data_full, join='inner', axis=0)
+
+        if arima_data_aligned.empty:
+            st.warning("Dados insuficientes após alinhamento com variáveis de feriado para treinar o modelo ARIMA.")
+            logging.warning("Dados insuficientes após alinhamento com variáveis de feriado para treinar o modelo ARIMA.")
+            return pd.DataFrame()
+
+        # Remover NaNs restantes após o align (se create_holiday_exog gerou NaNs ou o align criou - menos comum)
+        if arima_data_aligned.isnull().any() or exog_data_aligned.isnull().any().any():
+             initial_aligned_len = len(arima_data_aligned)
+             valid_indices = arima_data_aligned.dropna().index.intersection(exog_data_aligned.dropna(how='any').index)
+             arima_data = arima_data_aligned.loc[valid_indices]
+             exog_data = exog_data_aligned.loc[valid_indices]
+             if len(arima_data) < initial_aligned_len:
+                  logging.warning(f"Removidos {initial_aligned_len - len(arima_data)} pontos com NaNs após alinhamento e dropna.")
+             if arima_data.empty:
+                  st.warning("Dados insuficientes após alinhamento e limpeza de variáveis de feriado para treinar o modelo ARIMA.")
+                  logging.warning("Dados insuficientes restantes após alinhamento e limpeza de variáveis de feriado para treinar o modelo ARIMA.")
+                  return pd.DataFrame()
+        else:
+             # Sem NaNs após alinhamento, usar os dados alinhados diretamente
+             arima_data = arima_data_aligned
+             exog_data = exog_data_aligned
+
+
+        logging.info(f"Dados válidos finais (após alinhamento e limpeza): {len(arima_data)} pontos. Colunas exógenas: {exog_data.columns.tolist()}")
+
+
+    except Exception as e:
+        logging.error(f"Erro ao alinhar dados e features exógenas para ARIMA: {e}", exc_info=True)
+        st.error(f"Erro ao alinhar dados para o modelo ARIMA: {e}")
+        return pd.DataFrame()
+
+
+    # 3. Verificar se há dados suficientes para o modelo sazonal (com o período calculado)
+    # Um mínimo de 2 ciclos completos de dados válidos é recomendado
+    # O período para o modelo é o calculado 'calculated_period'
+    m_period_arima = calculated_period
+
+    min_data_points = 2 * m_period_arima # Mínimo 2 ciclos completos para detectar sazonalidade
+
+    if len(arima_data) < min_data_points:
+          st.warning(f"Dados insuficientes ({len(arima_data)} pontos válidos) para treinar um modelo de previsão ARIMA sazonal robusto com período {m_period_arima}. Necessário pelo menos {int(min_data_points)} pontos válidos após alinhamento.")
+          logging.warning(f"Dados insuficientes ({len(arima_data)}) para treinar ARIMA sazonal com período {m_period_arima}. Mínimo necessário: {int(min_data_points)}.")
+          return pd.DataFrame()
+    else:
+         logging.info(f"Quantidade de dados ({len(arima_data)}) suficiente para o período sazonal {m_period_arima}. Mínimo necessário: {int(min_data_points)}.")
+
+
+    # 4. Treinar o modelo ARIMA
+    try:
+        # auto_arima encontrará os melhores parâmetros p,d,q,P,D,Q
+        # Passando o período sazonal 'm' calculado
+        # Passando dados exógenos (X=exog_data)
+        with st.spinner(f"Treinando modelo ARIMA para a rota {route_id} com período sazonal m={m_period_arima}..."):
+              logging.info(f"Iniciando treinamento auto_arima com {len(arima_data)} pontos. m={m_period_arima}. Usando exógenas.")
+              model = auto_arima(arima_data, X=exog_data, seasonal=True, m=m_period_arima,
+                                 error_action='ignore', suppress_warnings=True,
+                                 stepwise=True, random_state=42,
+                                 n_fits=20) # Limitar o número de fits para evitar tempo excessivo
+              logging.info(f"Treinamento auto_arima concluído. Parâmetros: {model.get_params()}. Order: {model.order}, Seasonal Order: {model.seasonal_order}")
+              logging.info(f"AIC do modelo: {model.aic()}") # Log AIC para avaliar o ajuste do modelo
+
+
+    except Exception as e:
+        logging.exception("Erro durante o treinamento do modelo ARIMA:") # Log detalhado
+        st.error(f"Erro durante o treinamento do modelo ARIMA: {str(e)}")
+        st.info("Ocorreu um erro ao tentar ajustar o modelo ARIMA aos dados. Isso pode acontecer se os dados forem muito irregulares, tiverem muitos NaNs ou não exibirem padrões claros para o modelo capturar.")
+        return pd.DataFrame()
+
+    # 5. Realizar a previsão
+    try:
+        # Gerar dates futuras com base na última data histórica e frequência da série usada no treinamento
+        last_date = arima_data.index.max()
+        freq_str_final = arima_data.index.freqstr # Use a frequência real da série temporal FINAL
+
+        if freq_str_final is None:
+             logging.error("Não foi possível determinar a frequência da série temporal final para gerar datas futuras.")
+             st.error("Erro interno: Frequência da série temporal final desconhecida para previsão.")
+             return pd.DataFrame()
+
+        # Cria o range de datas futuras
+        # start é a próxima data após last_date com a frequência especificada
+        future_dates = pd.date_range(start=last_date + pd.Timedelta(freq_str_final), periods=steps, freq=freq_str_final)
+        logging.info(f"Datas futuras geradas para previsão: {len(future_dates)} pontos, de {future_dates.min()} a {future_dates.max()} com frequência {freq_str_final}.")
+
+
+        # Criar features exógenas (feriados e vésperas) para o PERÍODO DA PREVISÃO
+        # Use o índice das future_dates para gerar as exógenas futuras
+        future_exog_data = create_holiday_exog(future_dates)
+
+        # Reindexar para garantir alinhamento com as datas futuras geradas
+        future_exog_data = future_exog_data.reindex(future_dates)
+
+        # Verificar se future_exog_data tem as colunas esperadas e se está usando exógenas no modelo
+        # Comparar colunas com o dataframe exógeno usado no TREINO
+        if exog_data.columns.tolist() != future_exog_data.columns.tolist():
+            logging.error(f"Colunas de exógenas futuras não correspondem às de treino: {future_exog_data.columns} vs {exog_data.columns}")
+            st.error("Erro interno: Colunas de variáveis exógenas não correspondem entre treino e previsão.")
+            return pd.DataFrame()
+        # Garantir que não há NaNs nas exógenas futuras - create_holiday_exog já deve lidar com isso, mas verificamos
+        if future_exog_data.isnull().any().any():
+            logging.warning("NaNs encontrados em variáveis exógenas futuras. Previsão pode ser afetada. Preenchendo com 0.")
+            # Preencher NaNs em exógenas futuras com 0 (assumindo que NaN em is_holiday/is_pre_holiday significa 0)
+            future_exog_data = future_exog_data.fillna(0)
+
+
+        logging.info(f"Realizando previsão para {steps} passos.")
+        # PASSANDO DADOS EXÓGENOS FUTUROS (X=future_exog_data)
+        forecast, conf_int = model.predict(n_periods=steps, return_conf_int=True, X=future_exog_data)
+
+        # Ajustar o índice do forecast para as datas futuras corretas
+        if isinstance(forecast, np.ndarray):
+             forecast_series = pd.Series(forecast, index=future_dates)
+             conf_int_df = pd.DataFrame(conf_int, index=future_dates, columns=['yhat_lower', 'yhat_upper'])
+        else: # Assumir que é uma Série do pandas com o índice correto
+             forecast_series = forecast
+             conf_int_df = pd.DataFrame(conf_int, index=forecast.index, columns=['yhat_lower', 'yhat_upper'])
+             # Reindexar apenas se os índices realmente não baterem (segurança extra)
+             if not forecast_series.index.equals(future_dates):
+                 logging.warning("Índice do forecast do modelo não corresponde às datas futuras esperadas. Reindexando.")
+                 forecast_series = forecast_series.reindex(future_dates)
+                 conf_int_df = conf_int_df.reindex(future_dates)
+
+
+        forecast_df = pd.DataFrame({
+            'ds': forecast_series.index,
+            'yhat': forecast_series.values,
+            'yhat_lower': conf_int_df['yhat_lower'].values,
+            'yhat_upper': conf_int_df['yhat_upper'].values,
+            'id_route': route_id
+        })
+
+        # Garante que as previsões e intervalos de confiança não são negativos
+        forecast_df[['yhat', 'yhat_lower', 'yhat_upper']] = forecast_df[['yhat', 'yhat_lower', 'yhat_upper']].clip(lower=0)
+
+        logging.info(f"Previsão ARIMA concluída para {len(forecast_df)} pontos.")
+        return forecast_df
+
+    except Exception as e:
+        logging.exception("Erro durante a previsão com o modelo ARIMA:") # Log detalhado
+        st.error(f"Erro durante a previsão com o modelo ARIMA: {str(e)}")
+        st.info("Verifique se os dados de entrada, a frequência ou o número de passos futuros estão corretos.")
+        return pd.DataFrame()
+    
 #def create_arima_forecast(df, route_id, steps=10): # Removido m_period fixo
     logging.info(f"Iniciando create_arima_forecast para route_id {route_id}.")
 
