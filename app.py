@@ -529,8 +529,8 @@ def create_holiday_exog(index):
 # Função de previsão ARIMA (revisada para usar intervalos de confiança e tratamento de dados E EXOG)
 # Não cacheamos previsões pois elas dependem de dados recentes e podem ser acionadas pelo usuário
 # @st.cache_data # Não use cache_data para previsões se elas devem ser geradas sob demanda
-#def create_arima_forecast(df, route_id, steps=10, m_period=480):
-def create_arima_forecast(df, route_id, steps=10): # Removido m_period fixo
+def create_arima_forecast(df, route_id, steps=10, m_period=480):
+#def create_arima_forecast(df, route_id, steps=10): # Removido m_period fixo
     logging.info(f"Iniciando create_arima_forecast para route_id {route_id}.")
 
     if df is None or df.empty or 'data' not in df.columns or 'velocidade' not in df.columns:
