@@ -1573,7 +1573,7 @@ def main():
                      try:
                          st.info(f"Iniciando geração da previsão ARIMA para {route} com período sazonal m={arima_m_period} e {forecast_steps} passos futuros...")
                          # Chamada da função de previsão ARIMA (agora com exógenas e m_period)
-                         forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps, m_period=arima_m_period)
+                         forecast_df = create_arima_forecast(processed_df, route_id, steps=forecast_steps)
 
                          if not forecast_df.empty:
                              st.success(f"Previsão gerada para os próximos {forecast_steps * 3} minutos.")
