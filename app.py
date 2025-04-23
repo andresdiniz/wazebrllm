@@ -568,51 +568,55 @@ def create_arima_forecast(df, route_id, steps=10, m_period=480):
          st.warning(f"Dados insuficientes ({len(arima_data)} pontos) para treinar um modelo de previsão ARIMA sazonal robusto com período {m_period}. Necessário pelo menos {int(min_data_points)} pontos válidos após alinhamento.")
          return pd.DataFrame()
 
+    # Dentro de create_arima_forecast
     try:
-        # auto_arima encontrará os melhores parâmetros p,d,q,P,D,Q
-        # Passando o período sazonal 'm' selecionado pelo usuário
-        # PASSANDO DADOS EXÓGENOS (X=exog_data)
-        with st.spinner(f"Treinando modelo ARIMA para a rota {route_id} com período sazonal m={m_period}..."):
-             model = auto_arima(arima_data, X=exog_data, seasonal=True, m=m_period,
-                                error_action='ignore', suppress_warnings=True,
-                                stepwise=True, random_state=42,
-                                n_fits=20) # Limitar o número de fits para evitar tempo excessivo
+        df['data'] = pd.to_datetime(df['data'])
+        df_ts = df.set_index('data')['velocidade']
 
-        # Gerar dates futuras com base na última data histórica e frequência
-        last_date = arima_data.index.max()
-        # A frequência deve ser compatível com m=480 ou 3360 (baseado em 3min)
-        freq_str = '3min' # Assumindo 3minutos como base
+        logging.info(f"Pontos após set_index: {len(df_ts)}") # Log 1: Após setar índice
 
-        future_dates = pd.date_range(start=last_date, periods=steps + 1, freq=freq_str)[1:]
+        # Tente inferir a frequência primeiro, se falhar, use 3min
+        try:
+            df_ts_freq = df_ts.asfreq(pd.infer_freq(df_ts.index))
+            if df_ts_freq.index.freq is None:
+                 df_ts_freq = df_ts.asfreq('3min')
+                 logging.warning("Frequência da série temporal para ARIMA não inferida, usando '3min'.")
+            else:
+                 logging.info(f"Frequência da série temporal para ARIMA inferida: {df_ts_freq.index.freq}")
 
-        # Criar features exógenas (feriados e vésperas) para o PERÍODO DA PREVISÃO
-        future_exog_data = create_holiday_exog(future_dates)
-        # Garantir que o índice dos dados exógenos futuros corresponda exatamente às dates futuras
-        future_exog_data = future_exog_data.reindex(future_dates)
+            logging.info(f"Pontos após asfreq ({df_ts_freq.index.freq}): {len(df_ts_freq)}") # Log 2: Após asfreq
+            logging.info(f"NaNs após asfreq: {df_ts_freq.isnull().sum()}") # Log 3: NaNs após asfreq
 
-
-        # Realizar a previsão com intervalos de confiança
-        # PASSANDO DADOS EXÓGENOS FUTUROS (X=future_exog_data)
-        forecast, conf_int = model.predict(n_periods=steps, return_conf_int=True, X=future_exog_data)
+            # --- Ponto Crítico --- Adicionar Interpolação aqui se faltou na correção anterior
+            # Verifique se esta linha existe na sua versão atual:
+            df_ts_freq_interp = df_ts_freq.interpolate(method='time')
+            logging.info(f"Pontos após interpolação: {len(df_ts_freq_interp)}") # Log 4: Após interpolação
+            logging.info(f"NaNs após interpolação: {df_ts_freq_interp.isnull().sum()}") # Log 5: NaNs após interpolação
 
 
-        forecast_df = pd.DataFrame({
-            'ds': future_dates,
-            'yhat': forecast,
-            'yhat_lower': conf_int[:, 0], # Limite inferior do intervalo de confiança
-            'yhat_upper': conf_int[:, 1], # Limite superior do intervalo de confiança
-            'id_route': route_id
-        })
+            # Agora, remover NaNs restantes após a interpolação
+            arima_data_full = df_ts_freq_interp.dropna()
+            logging.info(f"Pontos após dropna (antes do join exógeno): {len(arima_data_full)}") # Log 6: Após dropna pós-interpolação
 
-        # Garante que as previsões e intervalos de confiança não são negativos
-        forecast_df[['yhat', 'yhat_lower', 'yhat_upper']] = forecast_df[['yhat', 'yhat_lower', 'yhat_upper']].clip(lower=0)
 
-        return forecast_df
+        except Exception: # Catch any error during freq setting
+             df_ts_freq = df_ts.asfreq('3min')
+             logging.warning("Erro ao inferir frequência para ARIMA, usando '3min'.")
+             # Adicionar interpolação mesmo no catch? Depende da estratégia
+             df_ts_freq_interp = df_ts_freq.interpolate(method='time') # Tentar interpolar mesmo se inferência falhou
+             arima_data_full = df_ts_freq_interp.dropna() # Drop NaNs restantes
+
+
     except Exception as e:
-        logging.exception("Erro durante o treinamento ou previsão do modelo ARIMA:") # Log detalhado
-        st.error(f"Erro durante o treinamento ou previsão do modelo ARIMA: {str(e)}")
-        st.info("Verifique os dados de entrada, a quantidade de dados, ou a configuração do modelo ARIMA.")
+        logging.error(f"Erro ao preparar série temporal para ARIMA: {e}", exc_info=True)
+        st.warning(f"Erro ao preparar dados para o modelo ARIMA: {e}")
         return pd.DataFrame()
+
+    # ... o resto da função continua a partir daqui ...
+    # A próxima perda pode ocorrer no .join(exog_data_full, how='inner').dropna()
+    # se houver datas no índice arima_data_full que não geraram features exógenas válidas
+    # (embora create_holiday_exog deva retornar um DataFrame com o mesmo índice).
+    # A última dropna() é a mais provável causa da perda restante após a frequência e interpolação.
 
 
 def save_forecast_to_db(forecast_df):
