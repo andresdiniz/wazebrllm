@@ -241,10 +241,10 @@ st.markdown(custom_theme, unsafe_allow_html=True)
 # Para configurar: crie um arquivo .streamlit/secrets.toml na raiz do seu projeto
 # Exemplo:
 # [mysql]
-# host = "185.213.81.52"
-# user = "u335174317_wazeportal"
-# password = "@Ndre2025." # Mude isso para sua senha real ou use secrets
-# database = "u335174317_wazeportal"
+# host = ""
+# user = ""
+# password = "" # Mude isso para sua senha real ou use secrets
+# database = ""
 
 def get_db_connection():
     """
